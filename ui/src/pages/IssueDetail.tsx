@@ -6,6 +6,7 @@ import { issuesApi } from "../api/issues";
 import { activityApi } from "../api/activity";
 import { heartbeatsApi } from "../api/heartbeats";
 import { instanceSettingsApi } from "../api/instanceSettings";
+import { runtimeSourcesApi } from "../api/runtimeSources";
 import { agentsApi } from "../api/agents";
 import { authApi } from "../api/auth";
 import { projectsApi } from "../api/projects";
@@ -51,6 +52,7 @@ import { PluginLauncherOutlet } from "@/plugins/launchers";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -64,6 +66,7 @@ import {
   EyeOff,
   Hexagon,
   ListTree,
+  Link2,
   MessageSquare,
   MoreHorizontal,
   Paperclip,
@@ -77,9 +80,11 @@ import {
   type ActivityEvent,
   type Agent,
   type FeedbackVote,
+  type IssueConversationSnapshot,
   type Issue,
   type IssueAttachment,
   type IssueComment,
+  type IssueRuntimeLink,
 } from "@paperclipai/shared";
 
 type CommentReassignment = IssueCommentReassignment;
@@ -97,6 +102,11 @@ const ACTION_LABELS: Record<string, string> = {
   "issue.checked_out": "checked out the issue",
   "issue.released": "released the issue",
   "issue.comment_added": "added a comment",
+  "issue.conversation_sent": "sent a conversation message",
+  "issue.conversation_steered": "steered the conversation",
+  "issue.conversation_interrupted": "interrupted the conversation",
+  "issue.runtime_link_upserted": "linked an external conversation",
+  "issue.runtime_link_removed": "removed an external conversation link",
   "issue.feedback_vote_saved": "saved feedback on an AI output",
   "issue.attachment_added": "added an attachment",
   "issue.attachment_removed": "removed an attachment",
@@ -126,6 +136,15 @@ function humanizeValue(value: unknown): string {
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+function asOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readRuntimeLinkRepoPath(runtimeLink: IssueRuntimeLink | null | undefined): string | null {
+  const metadata = asRecord(runtimeLink?.metadataJson);
+  return asOptionalString(metadata?.cwd) ?? asOptionalString(metadata?.repoPath);
 }
 
 function usageNumber(usage: Record<string, unknown> | null, ...keys: string[]) {
@@ -305,6 +324,16 @@ export function IssueDetail() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [optimisticComments, setOptimisticComments] = useState<OptimisticIssueComment[]>([]);
+  const [runtimeLinkDraft, setRuntimeLinkDraft] = useState<{
+    runtimeKind: "codex" | "openclaw";
+    externalConversationId: string;
+    externalConversationLabel: string;
+  }>({
+    runtimeKind: "codex",
+    externalConversationId: "",
+    externalConversationLabel: "",
+  });
+  const [repoPathDraft, setRepoPathDraft] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastMarkedReadIssueIdRef = useRef<string | null>(null);
 
@@ -344,6 +373,22 @@ export function IssueDetail() {
     queryKey: queryKeys.issues.approvals(issueId!),
     queryFn: () => issuesApi.listApprovals(issueId!),
     enabled: !!issueId,
+  });
+  const { data: runtimeLink } = useQuery({
+    queryKey: queryKeys.issues.runtimeLink(issueId!),
+    queryFn: () => issuesApi.getRuntimeLink(issueId!),
+    enabled: !!issueId,
+  });
+  const { data: externalConversation } = useQuery({
+    queryKey: queryKeys.issues.conversation(issueId!),
+    queryFn: () => issuesApi.getConversation(issueId!, 20),
+    enabled: !!issueId,
+    refetchInterval: (query) => {
+      const snapshot = query.state.data as IssueConversationSnapshot | undefined;
+      return snapshot?.isStreaming === true || (snapshot?.pendingApprovals.length ?? 0) > 0
+        ? 2000
+        : false;
+    },
   });
 
   const { data: attachments } = useQuery({
@@ -412,6 +457,15 @@ export function IssueDetail() {
     enabled: !!selectedCompanyId,
   });
   const currentUserId = session?.user?.id ?? session?.session?.userId ?? null;
+  const { data: repoCodexThreads } = useQuery({
+    queryKey: [...queryKeys.instance.runtimeSourcesCodexThreads, repoPathDraft.trim()],
+    queryFn: () => runtimeSourcesApi.codexThreads(7, repoPathDraft.trim()),
+    enabled: runtimeLinkDraft.runtimeKind === "codex" && repoPathDraft.trim().length > 0,
+  });
+  const { data: openclawSessions } = useQuery({
+    queryKey: queryKeys.instance.runtimeSourcesOpenClawSessions,
+    queryFn: () => runtimeSourcesApi.openclawSessions(5),
+  });
   const { data: feedbackVotes } = useQuery({
     queryKey: queryKeys.issues.feedbackVotes(issueId!),
     queryFn: () => issuesApi.listFeedbackVotes(issueId!),
@@ -423,6 +477,18 @@ export function IssueDetail() {
     enabled: !!issueId,
     retry: false,
   });
+  useEffect(() => {
+    if (!runtimeLink) return;
+    setRuntimeLinkDraft({
+      runtimeKind: runtimeLink.runtimeKind,
+      externalConversationId: runtimeLink.externalConversationId,
+      externalConversationLabel: runtimeLink.externalConversationLabel ?? "",
+    });
+    const savedRepoPath = readRuntimeLinkRepoPath(runtimeLink);
+    if (savedRepoPath) {
+      setRepoPathDraft(savedRepoPath);
+    }
+  }, [runtimeLink]);
   const keyboardShortcutsEnabled = instanceGeneralSettings?.keyboardShortcuts === true;
   const feedbackDataSharingPreference = instanceGeneralSettings?.feedbackDataSharingPreference ?? "prompt";
   const { orderedProjects } = useProjectOrder({
@@ -430,6 +496,26 @@ export function IssueDetail() {
     companyId: selectedCompanyId,
     userId: currentUserId,
   });
+  const issueProject = useMemo(
+    () => orderedProjects.find((project) => project.id === issue?.projectId) ?? null,
+    [orderedProjects, issue?.projectId],
+  );
+  const issueProjectWorkspace = useMemo(
+    () =>
+      issue?.projectWorkspaceId
+        ? issueProject?.workspaces.find((workspace) => workspace.id === issue.projectWorkspaceId) ?? null
+        : null,
+    [issue?.projectWorkspaceId, issueProject],
+  );
+  useEffect(() => {
+    const projectRepoPath =
+      issueProjectWorkspace?.cwd ??
+      issueProject?.codebase?.effectiveLocalFolder ??
+      issueProject?.primaryWorkspace?.cwd ??
+      "";
+    if (!projectRepoPath) return;
+    setRepoPathDraft((current) => (current.trim().length > 0 ? current : projectRepoPath));
+  }, [issueProject, issueProjectWorkspace]);
   const { slots: issuePluginDetailSlots } = usePluginSlots({
     slotTypes: ["detailTab"],
     entityType: "issue",
@@ -651,9 +737,140 @@ export function IssueDetail() {
     },
   });
 
+  const upsertRuntimeLink = useMutation({
+    mutationFn: (data: {
+      runtimeKind: "codex" | "openclaw";
+      externalConversationId: string;
+      externalConversationLabel?: string | null;
+      metadataJson?: Record<string, unknown> | null;
+    }) => issuesApi.upsertRuntimeLink(issueId!, data),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.issues.runtimeLink(issueId!) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.issues.conversation(issueId!) }),
+      ]);
+      pushToast({ title: "Runtime link saved", tone: "success" });
+    },
+    onError: (error) => {
+      pushToast({
+        title: "Runtime link failed",
+        body: error instanceof Error ? error.message : "Unable to save runtime link",
+        tone: "error",
+      });
+    },
+  });
+
+  const deleteRuntimeLink = useMutation({
+    mutationFn: () => issuesApi.deleteRuntimeLink(issueId!),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.issues.runtimeLink(issueId!) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.issues.conversation(issueId!) }),
+      ]);
+      setRuntimeLinkDraft({
+        runtimeKind: "codex",
+        externalConversationId: "",
+        externalConversationLabel: "",
+      });
+      pushToast({ title: "Runtime link removed", tone: "success" });
+    },
+    onError: (error) => {
+      pushToast({
+        title: "Remove runtime link failed",
+        body: error instanceof Error ? error.message : "Unable to remove runtime link",
+        tone: "error",
+      });
+    },
+  });
+
+  const resolveConversationApproval = useMutation({
+    mutationFn: ({
+      requestId,
+      decision,
+    }: {
+      requestId: string;
+      decision: "accept" | "acceptForSession" | "decline" | "cancel";
+    }) => issuesApi.resolveConversationApproval(issueId!, requestId, decision),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.issues.conversation(issueId!) });
+      pushToast({ title: "Approval resolved", tone: "success" });
+    },
+    onError: (error) => {
+      pushToast({
+        title: "Approval resolution failed",
+        body: error instanceof Error ? error.message : "Unable to resolve approval",
+        tone: "error",
+      });
+    },
+  });
+
+  const interruptConversation = useMutation({
+    mutationFn: () => issuesApi.interruptConversation(issueId!),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.issues.conversation(issueId!) });
+      pushToast({ title: "Conversation interrupted", tone: "success" });
+    },
+    onError: (error) => {
+      pushToast({
+        title: "Conversation interrupt failed",
+        body: error instanceof Error ? error.message : "Unable to interrupt conversation",
+        tone: "error",
+      });
+    },
+  });
+
+  const startCodexThreadForRepo = useMutation({
+    mutationFn: () =>
+      issuesApi.startCodexThreadForIssue(issueId!, {
+        cwd: repoPathDraft.trim(),
+        name: issue?.title ?? null,
+      }),
+    onSuccess: async (link) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.issues.runtimeLink(issueId!) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.issues.conversation(issueId!) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.instance.runtimeSourcesCodexThreads }),
+      ]);
+      setRuntimeLinkDraft({
+        runtimeKind: "codex",
+        externalConversationId: link.externalConversationId,
+        externalConversationLabel: link.externalConversationLabel ?? "",
+      });
+      pushToast({ title: "Started Codex thread", tone: "success" });
+    },
+    onError: (error) => {
+      pushToast({
+        title: "Start Codex thread failed",
+        body: error instanceof Error ? error.message : "Unable to start Codex thread",
+        tone: "error",
+      });
+    },
+  });
+
+  const pickRepoFolder = useMutation({
+    mutationFn: () => runtimeSourcesApi.pickDirectory("Choose a local repository folder"),
+    onSuccess: (result) => {
+      if (result.canceled || !result.path) return;
+      setRepoPathDraft(result.path);
+    },
+    onError: (error) => {
+      pushToast({
+        title: "Folder picker failed",
+        body: error instanceof Error ? error.message : "Unable to open folder picker",
+        tone: "error",
+      });
+    },
+  });
+
   const addComment = useMutation({
     mutationFn: ({ body, reopen, interrupt }: { body: string; reopen?: boolean; interrupt?: boolean }) =>
-      issuesApi.addComment(issueId!, body, reopen, interrupt),
+      runtimeLink && !reopen && !interrupt
+        ? (
+          externalConversation?.isStreaming
+            ? issuesApi.steerConversation(issueId!, body)
+            : issuesApi.sendConversation(issueId!, body)
+        ).then((result) => result.comment)
+        : issuesApi.addComment(issueId!, body, reopen, interrupt),
     onMutate: async ({ body, reopen, interrupt }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.issues.comments(issueId!) });
       await queryClient.cancelQueries({ queryKey: queryKeys.issues.detail(issueId!) });
@@ -715,6 +932,7 @@ export function IssueDetail() {
     onSettled: () => {
       invalidateIssue();
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.comments(issueId!) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.conversation(issueId!) });
     },
   });
 
@@ -1488,6 +1706,279 @@ export function IssueDetail() {
         project={orderedProjects.find((p) => p.id === issue.projectId) ?? null}
         onUpdate={(data) => updateIssue.mutate(data)}
       />
+
+      <section className="rounded-xl border border-border/70 bg-card/60 p-4 sm:p-5 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Link2 className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">External Conversation</h2>
+              {runtimeLink ? <StatusBadge status={runtimeLink.runtimeKind} /> : null}
+            </div>
+            <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
+              Keep the native Codex or OpenClaw session canonical while Paperclip supervises the work from here.
+            </p>
+          </div>
+        </div>
+
+        {runtimeLink ? (
+          <div className="rounded-lg border border-border/70 bg-background/50 px-3 py-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{runtimeLink.externalConversationLabel ?? "Linked conversation"}</span>
+              {repoPathDraft.trim() ? (
+                <span className="text-xs text-muted-foreground">{truncate(repoPathDraft, 72)}</span>
+              ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-auto"
+                disabled={deleteRuntimeLink.isPending}
+                onClick={() => deleteRuntimeLink.mutate()}
+              >
+                {deleteRuntimeLink.isPending ? "Removing..." : "Remove Link"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border/70 bg-background/40 px-3 py-3 text-sm text-muted-foreground">
+            No external conversation linked yet.
+          </div>
+        )}
+
+        <div className="rounded-lg border border-border/60 bg-background/30 p-3">
+          <div className="grid gap-3 md:grid-cols-3">
+          <label className="space-y-1 text-sm">
+            <span className="text-muted-foreground">Runtime</span>
+            <select
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={runtimeLinkDraft.runtimeKind}
+              onChange={(event) =>
+                setRuntimeLinkDraft((prev) => ({
+                  ...prev,
+                  runtimeKind: event.target.value as IssueRuntimeLink["runtimeKind"],
+                }))
+              }
+            >
+              <option value="codex">codex</option>
+              <option value="openclaw">openclaw</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-sm md:col-span-2">
+            <span className="text-muted-foreground">External conversation id</span>
+            <Input
+              value={runtimeLinkDraft.externalConversationId}
+              onChange={(event) =>
+                setRuntimeLinkDraft((prev) => ({ ...prev, externalConversationId: event.target.value }))
+              }
+              placeholder={runtimeLinkDraft.runtimeKind === "codex" ? "thr_..." : "agent:main:..."}
+            />
+          </label>
+          <label className="space-y-1 text-sm md:col-span-3">
+            <span className="text-muted-foreground">Label</span>
+            <Input
+              value={runtimeLinkDraft.externalConversationLabel}
+              onChange={(event) =>
+                setRuntimeLinkDraft((prev) => ({ ...prev, externalConversationLabel: event.target.value }))
+              }
+              placeholder="Optional human-readable label"
+            />
+          </label>
+          {runtimeLinkDraft.runtimeKind === "codex" ? (
+            <label className="space-y-1 text-sm md:col-span-3">
+              <span className="text-muted-foreground">Repo path</span>
+              <div className="flex gap-2">
+                <Input
+                  value={repoPathDraft}
+                  onChange={(event) => setRepoPathDraft(event.target.value)}
+                  placeholder={issueProjectWorkspace?.cwd ?? issueProject?.codebase?.effectiveLocalFolder ?? "/absolute/path/to/repo"}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => pickRepoFolder.mutate()}
+                  disabled={pickRepoFolder.isPending}
+                >
+                  {pickRepoFolder.isPending ? "Opening..." : "Choose Folder"}
+                </Button>
+                {issueProjectWorkspace?.cwd || issueProject?.codebase?.effectiveLocalFolder ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setRepoPathDraft(issueProjectWorkspace?.cwd ?? issueProject?.codebase?.effectiveLocalFolder ?? "")}
+                  >
+                    Use Project Repo
+                  </Button>
+                ) : null}
+              </div>
+            </label>
+          ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={
+              upsertRuntimeLink.isPending ||
+              runtimeLinkDraft.externalConversationId.trim().length === 0
+            }
+            onClick={() =>
+              upsertRuntimeLink.mutate({
+                runtimeKind: runtimeLinkDraft.runtimeKind,
+                externalConversationId: runtimeLinkDraft.externalConversationId.trim(),
+                externalConversationLabel: runtimeLinkDraft.externalConversationLabel.trim() || null,
+                metadataJson:
+                  runtimeLinkDraft.runtimeKind === "codex" && repoPathDraft.trim().length > 0
+                    ? {
+                      ...(runtimeLink?.runtimeKind === "codex"
+                        ? (asRecord(runtimeLink.metadataJson) ?? {})
+                        : {}),
+                      cwd: repoPathDraft.trim(),
+                    }
+                    : null,
+              })
+            }
+          >
+            {upsertRuntimeLink.isPending ? "Saving..." : "Save Link"}
+          </Button>
+          {runtimeLinkDraft.runtimeKind === "codex" ? (
+            <Button
+              variant="outline"
+              disabled={startCodexThreadForRepo.isPending || repoPathDraft.trim().length === 0}
+              onClick={() => startCodexThreadForRepo.mutate()}
+            >
+              {startCodexThreadForRepo.isPending ? "Starting..." : "Start New Codex Thread For Repo"}
+            </Button>
+          ) : null}
+        </div>
+
+        {runtimeLinkDraft.runtimeKind === "codex" && repoPathDraft.trim().length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Repo-related Codex Threads</p>
+            {(repoCodexThreads?.data?.length ?? 0) === 0 ? (
+              <div className="rounded-lg border border-border/70 bg-accent/10 px-3 py-3 text-sm text-muted-foreground">
+                No recent Codex threads found for this repo path yet.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(repoCodexThreads?.data ?? []).map((thread) => (
+                  <button
+                    key={thread.id}
+                    type="button"
+                    className="rounded-full border border-border bg-background/70 px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent/50"
+                    onClick={() =>
+                      setRuntimeLinkDraft({
+                        runtimeKind: "codex",
+                        externalConversationId: thread.id,
+                        externalConversationLabel: thread.threadName ?? "",
+                      })
+                    }
+                  >
+                    <div className="font-medium">{thread.threadName ?? "Untitled thread"}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {runtimeLinkDraft.runtimeKind === "openclaw" && (openclawSessions?.data?.length ?? 0) > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recent OpenClaw Sessions</p>
+            <div className="flex flex-wrap gap-2">
+                {(openclawSessions?.data ?? []).map((session) => (
+                  <button
+                    key={session.sessionKey}
+                    type="button"
+                    className="rounded-full border border-border bg-background/70 px-3 py-1.5 text-left text-xs transition-colors hover:bg-accent/50"
+                  onClick={() =>
+                    setRuntimeLinkDraft({
+                      runtimeKind: "openclaw",
+                      externalConversationId: session.sessionKey,
+                      externalConversationLabel: session.originLabel ?? "",
+                    })
+                  }
+                  >
+                    <div className="font-medium">{session.originLabel ?? "OpenClaw session"}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+        ) : null}
+
+        {externalConversation?.runtimeLink && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">External Conversation Preview</p>
+            {externalConversation.isStreaming ? (
+              <div className="rounded-lg border border-border/70 bg-accent/10 px-3 py-2 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between gap-3">
+                  <span>External conversation is active. New messages will steer the active turn.</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={interruptConversation.isPending}
+                    onClick={() => interruptConversation.mutate()}
+                  >
+                    {interruptConversation.isPending ? "Interrupting..." : "Interrupt"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {(externalConversation.pendingApprovals.length ?? 0) > 0 ? (
+              <div className="space-y-2">
+                {externalConversation.pendingApprovals.map((approval) => (
+                  <div key={approval.requestId} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-3">
+                    <div className="text-sm font-medium">
+                      {approval.kind === "command" ? "Command approval required" : "File change approval required"}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {approval.reason ?? approval.command ?? "Codex is waiting for approval."}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {approval.availableDecisions.map((decision) => (
+                        <Button
+                          key={decision}
+                          size="sm"
+                          variant={decision === "accept" || decision === "acceptForSession" ? "default" : "outline"}
+                          disabled={resolveConversationApproval.isPending}
+                          onClick={() =>
+                            resolveConversationApproval.mutate({
+                              requestId: approval.requestId,
+                              decision: decision as "accept" | "acceptForSession" | "decline" | "cancel",
+                            })
+                          }
+                        >
+                          {decision}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {externalConversation.sourceStatus !== "ok" ? (
+              <div className="rounded-lg border border-border/70 bg-accent/10 px-3 py-3 text-sm text-muted-foreground">
+                {externalConversation.error ?? "Conversation preview is not available right now."}
+              </div>
+            ) : externalConversation.items.length === 0 ? (
+              <div className="rounded-lg border border-border/70 bg-accent/10 px-3 py-3 text-sm text-muted-foreground">
+                No external conversation items were returned for this link yet.
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border/70 divide-y divide-border">
+                {externalConversation.items.map((item) => (
+                  <div key={`${item.source}:${item.id}`} className="px-3 py-2 text-sm">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium uppercase">{item.role}</span>
+                      <span>{item.source}</span>
+                    </div>
+                    <div className="mt-1 whitespace-pre-wrap break-words">{item.text}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       <Separator />
 

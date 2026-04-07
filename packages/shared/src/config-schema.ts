@@ -13,6 +13,33 @@ export const configMetaSchema = z.object({
   source: z.enum(["onboard", "configure", "doctor"]),
 });
 
+export const runtimeSourceModeSchema = z.enum(["linked", "managed"]);
+
+export const paperclipRuntimeSourceConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  mode: runtimeSourceModeSchema.default("linked"),
+  homeDir: z.string().default("~/.paperclip"),
+  instanceId: z.string().optional(),
+}).strict();
+
+export const codexRuntimeSourceConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  mode: runtimeSourceModeSchema.default("linked"),
+  homeDir: z.string().default("~/.codex"),
+}).strict();
+
+export const openclawRuntimeSourceConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  mode: runtimeSourceModeSchema.default("linked"),
+  homeDir: z.string().default("~/.openclaw"),
+}).strict();
+
+export const runtimeSourcesConfigSchema = z.object({
+  paperclip: paperclipRuntimeSourceConfigSchema.optional(),
+  codex: codexRuntimeSourceConfigSchema.optional(),
+  openclaw: openclawRuntimeSourceConfigSchema.optional(),
+}).strict();
+
 export const llmConfigSchema = z.object({
   provider: z.enum(["claude", "openai"]),
   apiKey: z.string().optional(),
@@ -130,6 +157,7 @@ export const paperclipConfigSchema = z
         keyFilePath: "~/.paperclip/instances/default/secrets/master.key",
       },
     }),
+    runtimeSources: runtimeSourcesConfigSchema.optional(),
   })
   .superRefine((value, ctx) => {
     if (value.server.deploymentMode === "local_trusted") {
@@ -181,4 +209,9 @@ export type SecretsLocalEncryptedConfig = z.infer<typeof secretsLocalEncryptedCo
 export type AuthConfig = z.infer<typeof authConfigSchema>;
 export type TelemetryConfig = z.infer<typeof telemetryConfigSchema>;
 export type ConfigMeta = z.infer<typeof configMetaSchema>;
+export type RuntimeSourceMode = z.infer<typeof runtimeSourceModeSchema>;
+export type PaperclipRuntimeSourceConfig = z.infer<typeof paperclipRuntimeSourceConfigSchema>;
+export type CodexRuntimeSourceConfig = z.infer<typeof codexRuntimeSourceConfigSchema>;
+export type OpenclawRuntimeSourceConfig = z.infer<typeof openclawRuntimeSourceConfigSchema>;
+export type RuntimeSourcesConfig = z.infer<typeof runtimeSourcesConfigSchema>;
 export type DatabaseBackupConfig = z.infer<typeof databaseBackupConfigSchema>;

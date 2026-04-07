@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AdapterEnvironmentTestResult } from "@paperclipai/shared";
 import { useLocation, useNavigate, useParams } from "@/lib/router";
 import { useDialog } from "../context/DialogContext";
@@ -9,6 +9,7 @@ import { goalsApi } from "../api/goals";
 import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
+import { runtimeSourcesApi } from "../api/runtimeSources";
 import { queryKeys } from "../lib/queryKeys";
 import { Dialog, DialogPortal } from "@/components/ui/dialog";
 import {
@@ -51,7 +52,8 @@ import {
   Check,
   Loader2,
   ChevronDown,
-  X
+  X,
+  Link2,
 } from "lucide-react";
 
 
@@ -126,6 +128,7 @@ export function OnboardingWizard() {
   const [taskDescription, setTaskDescription] = useState(
     DEFAULT_TASK_DESCRIPTION
   );
+  const [repoPath, setRepoPath] = useState("");
 
   // Auto-grow textarea for task description
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -167,6 +170,7 @@ export function OnboardingWizard() {
     setCreatedProjectId(null);
     setCreatedAgentId(null);
     setCreatedIssueRef(null);
+    setRepoPath("");
   }, [
     effectiveOnboardingOpen,
     effectiveOnboardingOptions.companyId,
@@ -296,6 +300,7 @@ export function OnboardingWizard() {
     setUnsetAnthropicLoading(false);
     setTaskTitle("Hire your first engineer and create a hiring plan");
     setTaskDescription(DEFAULT_TASK_DESCRIPTION);
+    setRepoPath("");
     setCreatedCompanyId(null);
     setCreatedCompanyPrefix(null);
     setCreatedCompanyGoalId(null);
@@ -531,6 +536,17 @@ export function OnboardingWizard() {
     }
   }
 
+  const pickRepoFolder = useMutation({
+    mutationFn: () => runtimeSourcesApi.pickDirectory("Choose a local repository folder"),
+    onSuccess: (result) => {
+      if (result.canceled || !result.path) return;
+      setRepoPath(result.path);
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : "Unable to open the folder picker");
+    },
+  });
+
   async function handleStep3Next() {
     if (!createdCompanyId || !createdAgentId) return;
     setError(null);
@@ -542,6 +558,7 @@ export function OnboardingWizard() {
     setLoading(true);
     setError(null);
     try {
+      const trimmedRepoPath = repoPath.trim();
       let goalId = createdCompanyGoalId;
       if (!goalId) {
         const goals = await goalsApi.list(createdCompanyId);
@@ -550,12 +567,19 @@ export function OnboardingWizard() {
       }
 
       let projectId = createdProjectId;
+      let projectWorkspaceId: string | null = null;
       if (!projectId) {
         const project = await projectsApi.create(
           createdCompanyId,
-          buildOnboardingProjectPayload(goalId)
+          buildOnboardingProjectPayload(goalId, trimmedRepoPath || null)
         );
         projectId = project.id;
+        projectWorkspaceId =
+          (trimmedRepoPath
+            ? project.workspaces?.find((workspace) => workspace.cwd === trimmedRepoPath)?.id
+            : null)
+          ?? project.primaryWorkspace?.id
+          ?? null;
         setCreatedProjectId(projectId);
         queryClient.invalidateQueries({
           queryKey: queryKeys.projects.list(createdCompanyId)
@@ -571,9 +595,20 @@ export function OnboardingWizard() {
             description: taskDescription,
             assigneeAgentId: createdAgentId,
             projectId,
+            projectWorkspaceId,
             goalId
           })
         );
+        if (trimmedRepoPath && adapterType === "codex_local") {
+          try {
+            await issuesApi.startCodexThreadForIssue(issue.id, {
+              cwd: trimmedRepoPath,
+              name: taskTitle.trim(),
+            });
+          } catch (threadError) {
+            console.warn("Failed to attach onboarding Codex thread", threadError);
+          }
+        }
         issueRef = issue.identifier ?? issue.id;
         setCreatedIssueRef(issueRef);
         queryClient.invalidateQueries({
@@ -1131,6 +1166,38 @@ export function OnboardingWizard() {
                       onChange={(e) => setTaskDescription(e.target.value)}
                     />
                   </div>
+                  <div className="space-y-2 rounded-lg border border-border/70 bg-muted/10 p-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">
+                        Git repo (optional)
+                      </label>
+                      <p className="text-[11px] text-muted-foreground">
+                        Attach a local repo now so the onboarding project and first issue are born with a real working directory.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                        placeholder="/absolute/path/to/repo"
+                        value={repoPath}
+                        onChange={(e) => setRepoPath(e.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={pickRepoFolder.isPending}
+                        onClick={() => pickRepoFolder.mutate()}
+                      >
+                        {pickRepoFolder.isPending ? "Opening..." : "Choose Folder"}
+                      </Button>
+                    </div>
+                    {adapterType === "codex_local" && repoPath.trim() ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        Paperclip will also start a shared Codex thread for this repo so the issue shows up in Codex too.
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               )}
 
@@ -1181,6 +1248,18 @@ export function OnboardingWizard() {
                       </div>
                       <Check className="h-4 w-4 text-green-500 shrink-0" />
                     </div>
+                    {repoPath.trim() ? (
+                      <div className="flex items-center gap-3 px-3 py-2.5">
+                        <Link2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {repoPath}
+                          </p>
+                          <p className="text-xs text-muted-foreground">Attached repo</p>
+                        </div>
+                        <Check className="h-4 w-4 text-green-500 shrink-0" />
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               )}

@@ -115,6 +115,55 @@ export interface IssueRelation {
   relatedIssue: IssueRelationIssueSummary;
 }
 
+export type IssueRuntimeKind = "codex" | "openclaw";
+
+export interface IssueRuntimeLink {
+  issueId: string;
+  companyId: string;
+  runtimeKind: IssueRuntimeKind;
+  externalConversationId: string;
+  externalConversationLabel: string | null;
+  metadataJson: Record<string, unknown> | null;
+  linkedByAgentId: string | null;
+  linkedByUserId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type IssueConversationItemRole = "user" | "assistant" | "tool" | "system";
+
+export interface IssueConversationItem {
+  id: string;
+  role: IssueConversationItemRole;
+  text: string;
+  createdAt: string | null;
+  source: IssueRuntimeKind;
+  rawType?: string | null;
+}
+
+export interface IssueConversationPendingApproval {
+  requestId: string;
+  approvalId: string | null;
+  kind: "command" | "file";
+  turnId: string | null;
+  itemId: string | null;
+  reason: string | null;
+  command: string | null;
+  cwd: string | null;
+  availableDecisions: string[];
+}
+
+export interface IssueConversationSnapshot {
+  issueId: string;
+  runtimeLink: IssueRuntimeLink | null;
+  sourceStatus: "unlinked" | "ok" | "source_unavailable" | "error";
+  activeTurnId: string | null;
+  isStreaming: boolean;
+  pendingApprovals: IssueConversationPendingApproval[];
+  items: IssueConversationItem[];
+  error: string | null;
+}
+
 export interface Issue {
   id: string;
   companyId: string;
@@ -154,6 +203,8 @@ export interface Issue {
   labels?: IssueLabel[];
   blockedBy?: IssueRelationIssueSummary[];
   blocks?: IssueRelationIssueSummary[];
+  runtimeLink?: IssueRuntimeLink | null;
+  conversation?: IssueConversationSnapshot | null;
   planDocument?: IssueDocument | null;
   documentSummaries?: IssueDocumentSummary[];
   legacyPlanDocument?: LegacyPlanDocument | null;

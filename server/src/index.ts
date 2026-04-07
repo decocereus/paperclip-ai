@@ -15,6 +15,7 @@ import {
   inspectMigrations,
   applyPendingMigrations,
   createEmbeddedPostgresLogBuffer,
+  hydrateEmbeddedPostgresRuntimeSymlinks,
   reconcilePendingMigrationHistory,
   formatDatabaseBackupResult,
   runDatabaseBackup,
@@ -271,6 +272,7 @@ export async function startServer(): Promise<StartedServer> {
     const moduleName = "embedded-postgres";
     let EmbeddedPostgres: EmbeddedPostgresCtor;
     try {
+      await hydrateEmbeddedPostgresRuntimeSymlinks();
       const mod = await import(moduleName);
       EmbeddedPostgres = mod.default as EmbeddedPostgresCtor;
     } catch {

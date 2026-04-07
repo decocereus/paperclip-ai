@@ -105,4 +105,45 @@ describe("onboard", () => {
     expect(fs.existsSync(`${fixture.configPath}.backup`)).toBe(false);
     expect(fs.existsSync(path.join(path.dirname(fixture.configPath), ".env"))).toBe(true);
   });
+
+  it("links detected runtime sources during non-interactive quickstart onboarding", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-onboard-new-"));
+    const configPath = path.join(root, ".paperclip", "config.json");
+    const paperclipHome = path.join(root, "paperclip-home");
+    const codexHome = path.join(root, "codex-home");
+    const openclawHome = path.join(root, "openclaw-home");
+
+    fs.mkdirSync(path.join(paperclipHome, "instances", "default"), { recursive: true });
+    fs.mkdirSync(path.join(codexHome, "plugins"), { recursive: true });
+    fs.writeFileSync(path.join(codexHome, "session_index.jsonl"), `${JSON.stringify({ id: "thr_1" })}\n`);
+    fs.mkdirSync(path.join(openclawHome, "sessions"), { recursive: true });
+    fs.writeFileSync(path.join(openclawHome, "sessions", "sessions.json"), JSON.stringify({ "agent:main:1": {} }));
+
+    process.env.PAPERCLIP_HOME = paperclipHome;
+    process.env.PAPERCLIP_INSTANCE_ID = "default";
+    process.env.CODEX_HOME = codexHome;
+    process.env.OPENCLAW_HOME = openclawHome;
+
+    await onboard({ config: configPath, yes: true, invokedByRun: true });
+
+    const written = JSON.parse(fs.readFileSync(configPath, "utf8")) as PaperclipConfig;
+    expect(written.runtimeSources).toEqual({
+      paperclip: {
+        enabled: true,
+        mode: "linked",
+        homeDir: paperclipHome,
+        instanceId: "default",
+      },
+      codex: {
+        enabled: true,
+        mode: "linked",
+        homeDir: codexHome,
+      },
+      openclaw: {
+        enabled: true,
+        mode: "linked",
+        homeDir: openclawHome,
+      },
+    });
+  });
 });

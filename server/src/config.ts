@@ -10,6 +10,7 @@ import {
   DEPLOYMENT_MODES,
   SECRET_PROVIDERS,
   STORAGE_PROVIDERS,
+  type RuntimeSourcesConfig,
   type AuthBaseUrlMode,
   type DeploymentExposure,
   type DeploymentMode,
@@ -70,6 +71,7 @@ export interface Config {
   storageS3Endpoint: string | undefined;
   storageS3Prefix: string;
   storageS3ForcePathStyle: boolean;
+  runtimeSources: RuntimeSourcesConfig | null;
   feedbackExportBackendUrl: string | undefined;
   feedbackExportBackendToken: string | undefined;
   heartbeatSchedulerEnabled: boolean;
@@ -263,6 +265,7 @@ export function loadConfig(): Config {
     storageS3Endpoint,
     storageS3Prefix,
     storageS3ForcePathStyle,
+    runtimeSources: fileConfig?.runtimeSources ?? null,
     feedbackExportBackendUrl,
     feedbackExportBackendToken,
     heartbeatSchedulerEnabled: process.env.HEARTBEAT_SCHEDULER_ENABLED !== "false",

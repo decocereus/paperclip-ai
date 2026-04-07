@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +13,28 @@ function nonEmpty(value: string | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function resolveHomeAwarePath(value: string): string {
+  if (value === "~") return os.homedir();
+  if (value.startsWith("~/")) return path.resolve(os.homedir(), value.slice(2));
+  return path.resolve(value);
+}
+
+function readRuntimeSourcesCodexConfig(env: NodeJS.ProcessEnv): Record<string, unknown> | null {
+  const configPath = nonEmpty(env.PAPERCLIP_CONFIG);
+  if (!configPath || !fsSync.existsSync(configPath)) return null;
+  try {
+    const parsed = JSON.parse(fsSync.readFileSync(configPath, "utf8")) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const runtimeSources = (parsed as Record<string, unknown>).runtimeSources;
+    if (typeof runtimeSources !== "object" || runtimeSources === null || Array.isArray(runtimeSources)) return null;
+    const codex = (runtimeSources as Record<string, unknown>).codex;
+    if (typeof codex !== "object" || codex === null || Array.isArray(codex)) return null;
+    return codex as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export async function pathExists(candidate: string): Promise<boolean> {
   return fs.access(candidate).then(() => true).catch(() => false);
 }
@@ -20,7 +43,33 @@ export function resolveSharedCodexHomeDir(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   const fromEnv = nonEmpty(env.CODEX_HOME);
-  return fromEnv ? path.resolve(fromEnv) : path.join(os.homedir(), ".codex");
+  if (fromEnv) return path.resolve(fromEnv);
+
+  const codexConfig = readRuntimeSourcesCodexConfig(env);
+  const configuredHome = nonEmpty(
+    typeof codexConfig?.homeDir === "string" ? codexConfig.homeDir : undefined,
+  );
+  if (configuredHome) return resolveHomeAwarePath(configuredHome);
+
+  return path.join(os.homedir(), ".codex");
+}
+
+export function resolveLinkedCodexHomeDir(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const codexConfig = readRuntimeSourcesCodexConfig(env);
+  if (!codexConfig) return null;
+  const enabled =
+    typeof codexConfig.enabled === "boolean"
+      ? codexConfig.enabled
+      : true;
+  if (!enabled) return null;
+  const mode =
+    typeof codexConfig.mode === "string" && codexConfig.mode.trim().length > 0
+      ? codexConfig.mode.trim()
+      : "linked";
+  if (mode !== "linked") return null;
+  return resolveSharedCodexHomeDir(env);
 }
 
 function isWorktreeMode(env: NodeJS.ProcessEnv): boolean {

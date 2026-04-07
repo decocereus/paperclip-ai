@@ -10,6 +10,7 @@ import { projectsApi } from "../api/projects";
 import { agentsApi } from "../api/agents";
 import { authApi } from "../api/auth";
 import { assetsApi } from "../api/assets";
+import { runtimeSourcesApi } from "../api/runtimeSources";
 import { queryKeys } from "../lib/queryKeys";
 import { useProjectOrder } from "../hooks/useProjectOrder";
 import { getRecentAssigneeIds, sortAgentsByRecency, trackRecentAssignee } from "../lib/recent-assignees";
@@ -47,6 +48,7 @@ import {
   FileText,
   Loader2,
   X,
+  Link2,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { extractProviderIdWithFallback } from "../lib/model-utils";
@@ -71,6 +73,9 @@ interface IssueDraft {
   assigneeModelOverride: string;
   assigneeThinkingEffort: string;
   assigneeChrome: boolean;
+  repoPath?: string;
+  selectedCodexThreadId?: string;
+  selectedCodexThreadLabel?: string;
   executionWorkspaceMode?: string;
   selectedExecutionWorkspaceId?: string;
   useIsolatedExecutionWorkspace?: boolean;
@@ -219,6 +224,47 @@ function formatFileSize(file: File) {
   return `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function normalizePath(value: string | null | undefined) {
+  if (!value) return "";
+  return value.trim().replace(/[\\/]+$/, "");
+}
+
+function repoNameFromPath(repoPath: string) {
+  const normalized = normalizePath(repoPath);
+  const segments = normalized.split(/[\\/]/).filter(Boolean);
+  return segments[segments.length - 1] ?? "repo";
+}
+
+function findProjectWorkspaceByPath(
+  project: { workspaces?: Array<{ id: string; cwd: string | null }> } | null | undefined,
+  repoPath: string,
+) {
+  const normalized = normalizePath(repoPath);
+  if (!normalized || !project?.workspaces?.length) return null;
+  return project.workspaces.find((workspace) => normalizePath(workspace.cwd) === normalized) ?? null;
+}
+
+function repoPathForProject(
+  project: {
+    workspaces?: Array<{ id: string; cwd: string | null; isPrimary: boolean }>;
+    codebase?: { effectiveLocalFolder: string; localFolder?: string | null } | null;
+  } | null | undefined,
+  projectWorkspaceId?: string | null,
+) {
+  const matchingWorkspace =
+    projectWorkspaceId
+      ? project?.workspaces?.find((workspace) => workspace.id === projectWorkspaceId)?.cwd ?? null
+      : null;
+  return (
+    matchingWorkspace
+    ?? project?.codebase?.localFolder
+    ?? project?.codebase?.effectiveLocalFolder
+    ?? project?.workspaces?.find((workspace) => workspace.isPrimary)?.cwd
+    ?? project?.workspaces?.[0]?.cwd
+    ?? ""
+  );
+}
+
 const statuses = [
   { value: "backlog", label: "Backlog", color: issueStatusText.backlog ?? issueStatusTextDefault },
   { value: "todo", label: "Todo", color: issueStatusText.todo ?? issueStatusTextDefault },
@@ -286,6 +332,9 @@ export function NewIssueDialog() {
   const [assigneeModelOverride, setAssigneeModelOverride] = useState("");
   const [assigneeThinkingEffort, setAssigneeThinkingEffort] = useState("");
   const [assigneeChrome, setAssigneeChrome] = useState(false);
+  const [repoPath, setRepoPath] = useState("");
+  const [selectedCodexThreadId, setSelectedCodexThreadId] = useState("");
+  const [selectedCodexThreadLabel, setSelectedCodexThreadLabel] = useState("");
   const [executionWorkspaceMode, setExecutionWorkspaceMode] = useState<string>("shared_workspace");
   const [selectedExecutionWorkspaceId, setSelectedExecutionWorkspaceId] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -332,6 +381,11 @@ export function NewIssueDialog() {
         reuseEligible: true,
       }),
     enabled: Boolean(effectiveCompanyId) && newIssueOpen && Boolean(projectId),
+  });
+  const { data: repoCodexThreads } = useQuery({
+    queryKey: [...queryKeys.instance.runtimeSourcesCodexThreads, "new-issue", repoPath.trim()],
+    queryFn: () => runtimeSourcesApi.codexThreads(7, repoPath.trim()),
+    enabled: newIssueOpen && repoPath.trim().length > 0,
   });
   const { data: session } = useQuery({
     queryKey: queryKeys.auth.session,
@@ -401,9 +455,82 @@ export function NewIssueDialog() {
     mutationFn: async ({
       companyId,
       stagedFiles: pendingStagedFiles,
+      repoPath: repoPathInput,
+      selectedCodexThreadId: selectedThreadId,
+      selectedCodexThreadLabel: selectedThreadLabel,
       ...data
-    }: { companyId: string; stagedFiles: StagedIssueFile[] } & Record<string, unknown>) => {
-      const issue = await issuesApi.create(companyId, data);
+    }: {
+      companyId: string;
+      stagedFiles: StagedIssueFile[];
+      repoPath?: string;
+      selectedCodexThreadId?: string;
+      selectedCodexThreadLabel?: string;
+    } & Record<string, unknown>) => {
+      const trimmedRepoPath = typeof repoPathInput === "string" ? repoPathInput.trim() : "";
+      const projectId =
+        typeof data.projectId === "string" ? data.projectId : "";
+      const issuePayload = { ...data };
+      let ensuredProjectWorkspaceId =
+        typeof issuePayload.projectWorkspaceId === "string"
+          ? issuePayload.projectWorkspaceId
+          : "";
+
+      if (trimmedRepoPath && projectId) {
+        const selectedProject =
+          orderedProjects.find((project) => project.id === projectId) ?? null;
+        const existingWorkspace = findProjectWorkspaceByPath(
+          selectedProject,
+          trimmedRepoPath,
+        );
+        if (existingWorkspace) {
+          ensuredProjectWorkspaceId = existingWorkspace.id;
+        } else {
+          const createdWorkspace = await projectsApi.createWorkspace(
+            projectId,
+            {
+              name: repoNameFromPath(trimmedRepoPath),
+              sourceType: "local_path",
+              cwd: trimmedRepoPath,
+              isPrimary: !(selectedProject?.workspaces?.length ?? 0),
+            },
+            companyId,
+          );
+          ensuredProjectWorkspaceId = createdWorkspace.id;
+        }
+      }
+
+      if (ensuredProjectWorkspaceId) {
+        issuePayload.projectWorkspaceId = ensuredProjectWorkspaceId;
+      }
+
+      const issue = await issuesApi.create(companyId, issuePayload);
+
+      let runtimeLinkWarning: string | null = null;
+      try {
+        if (selectedThreadId) {
+          await issuesApi.upsertRuntimeLink(issue.id, {
+            runtimeKind: "codex",
+            externalConversationId: selectedThreadId,
+            externalConversationLabel: selectedThreadLabel?.trim() || null,
+            metadataJson: trimmedRepoPath ? { cwd: trimmedRepoPath } : null,
+          });
+        } else if (
+          trimmedRepoPath &&
+          assigneeAdapterType === "codex_local" &&
+          selectedAssigneeAgentId
+        ) {
+          await issuesApi.startCodexThreadForIssue(issue.id, {
+            cwd: trimmedRepoPath,
+            name: typeof data.title === "string" ? data.title : null,
+          });
+        }
+      } catch (error) {
+        runtimeLinkWarning =
+          error instanceof Error
+            ? error.message
+            : "Issue created, but Paperclip could not finish attaching the repo-linked Codex conversation.";
+      }
+
       const failures: string[] = [];
 
       for (const stagedFile of pendingStagedFiles) {
@@ -424,21 +551,30 @@ export function NewIssueDialog() {
         }
       }
 
-      return { issue, companyId, failures };
+      return { issue, companyId, failures, runtimeLinkWarning };
     },
-    onSuccess: ({ issue, companyId, failures }) => {
+    onSuccess: ({ issue, companyId, failures, runtimeLinkWarning }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(companyId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.listMineByMe(companyId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.listTouchedByMe(companyId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.listUnreadTouchedByMe(companyId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.sidebarBadges(companyId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.list(companyId) });
+      if (issue.projectId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(issue.projectId) });
+      }
       if (draftTimer.current) clearTimeout(draftTimer.current);
-      if (failures.length > 0) {
+      if (failures.length > 0 || runtimeLinkWarning) {
         const prefix = (companies.find((company) => company.id === companyId)?.issuePrefix ?? "").trim();
         const issueRef = issue.identifier ?? issue.id;
         pushToast({
-          title: `Created ${issueRef} with upload warnings`,
-          body: `${failures.length} staged ${failures.length === 1 ? "file" : "files"} could not be added.`,
+          title: `Created ${issueRef} with warnings`,
+          body: [
+            failures.length > 0
+              ? `${failures.length} staged ${failures.length === 1 ? "file" : "files"} could not be added.`
+              : null,
+            runtimeLinkWarning,
+          ].filter(Boolean).join(" "),
           tone: "warn",
           action: prefix
             ? { label: `Open ${issueRef}`, href: `/${prefix}/issues/${issueRef}` }
@@ -455,6 +591,23 @@ export function NewIssueDialog() {
     mutationFn: async (file: File) => {
       if (!effectiveCompanyId) throw new Error("No company selected");
       return assetsApi.uploadImage(effectiveCompanyId, file, "issues/drafts");
+    },
+  });
+
+  const pickRepoFolder = useMutation({
+    mutationFn: () => runtimeSourcesApi.pickDirectory("Choose a local repository folder"),
+    onSuccess: (result) => {
+      if (result.canceled || !result.path) return;
+      setRepoPath(result.path);
+      setSelectedCodexThreadId("");
+      setSelectedCodexThreadLabel("");
+    },
+    onError: (error) => {
+      pushToast({
+        title: "Folder picker failed",
+        body: error instanceof Error ? error.message : "Unable to open folder picker",
+        tone: "error",
+      });
     },
   });
 
@@ -483,6 +636,9 @@ export function NewIssueDialog() {
       assigneeModelOverride,
       assigneeThinkingEffort,
       assigneeChrome,
+      repoPath,
+      selectedCodexThreadId,
+      selectedCodexThreadLabel,
       executionWorkspaceMode,
       selectedExecutionWorkspaceId,
     });
@@ -497,6 +653,9 @@ export function NewIssueDialog() {
     assigneeModelOverride,
     assigneeThinkingEffort,
     assigneeChrome,
+    repoPath,
+    selectedCodexThreadId,
+    selectedCodexThreadLabel,
     executionWorkspaceMode,
     selectedExecutionWorkspaceId,
     newIssueOpen,
@@ -523,6 +682,9 @@ export function NewIssueDialog() {
       setAssigneeModelOverride("");
       setAssigneeThinkingEffort("");
       setAssigneeChrome(false);
+      setRepoPath(repoPathForProject(defaultProject));
+      setSelectedCodexThreadId("");
+      setSelectedCodexThreadLabel("");
       setExecutionWorkspaceMode(defaultExecutionWorkspaceModeForProject(defaultProject));
       setSelectedExecutionWorkspaceId("");
       executionWorkspaceDefaultProjectId.current = defaultProjectId || null;
@@ -543,6 +705,9 @@ export function NewIssueDialog() {
       setAssigneeModelOverride(draft.assigneeModelOverride ?? "");
       setAssigneeThinkingEffort(draft.assigneeThinkingEffort ?? "");
       setAssigneeChrome(draft.assigneeChrome ?? false);
+      setRepoPath(draft.repoPath ?? repoPathForProject(restoredProject, draft.projectWorkspaceId));
+      setSelectedCodexThreadId(draft.selectedCodexThreadId ?? "");
+      setSelectedCodexThreadLabel(draft.selectedCodexThreadLabel ?? "");
       setExecutionWorkspaceMode(
         draft.executionWorkspaceMode
           ?? (draft.useIsolatedExecutionWorkspace ? "isolated_workspace" : defaultExecutionWorkspaceModeForProject(restoredProject)),
@@ -560,6 +725,9 @@ export function NewIssueDialog() {
       setAssigneeModelOverride("");
       setAssigneeThinkingEffort("");
       setAssigneeChrome(false);
+      setRepoPath(repoPathForProject(defaultProject));
+      setSelectedCodexThreadId("");
+      setSelectedCodexThreadLabel("");
       setExecutionWorkspaceMode(defaultExecutionWorkspaceModeForProject(defaultProject));
       setSelectedExecutionWorkspaceId("");
       executionWorkspaceDefaultProjectId.current = defaultProjectId || null;
@@ -605,6 +773,9 @@ export function NewIssueDialog() {
     setAssigneeModelOverride("");
     setAssigneeThinkingEffort("");
     setAssigneeChrome(false);
+    setRepoPath("");
+    setSelectedCodexThreadId("");
+    setSelectedCodexThreadLabel("");
     setExecutionWorkspaceMode("shared_workspace");
     setSelectedExecutionWorkspaceId("");
     setExpanded(false);
@@ -624,6 +795,9 @@ export function NewIssueDialog() {
     setAssigneeModelOverride("");
     setAssigneeThinkingEffort("");
     setAssigneeChrome(false);
+    setRepoPath("");
+    setSelectedCodexThreadId("");
+    setSelectedCodexThreadLabel("");
     setExecutionWorkspaceMode("shared_workspace");
     setSelectedExecutionWorkspaceId("");
   }
@@ -636,6 +810,14 @@ export function NewIssueDialog() {
 
   function handleSubmit() {
     if (!effectiveCompanyId || !title.trim() || createIssue.isPending) return;
+    if (repoPath.trim().length > 0 && !projectId && !selectedCodexThreadId && assigneeAdapterType !== "codex_local") {
+      pushToast({
+        title: "Repo needs a durable home",
+        body: "Attach this issue to a project or choose a Codex thread so the repo context survives after creation.",
+        tone: "warn",
+      });
+      return;
+    }
     const assigneeAdapterOverrides = buildAssigneeAdapterOverrides({
       adapterType: assigneeAdapterType,
       modelOverride: assigneeModelOverride,
@@ -660,6 +842,9 @@ export function NewIssueDialog() {
     createIssue.mutate({
       companyId: effectiveCompanyId,
       stagedFiles,
+      repoPath: repoPath.trim(),
+      selectedCodexThreadId: selectedCodexThreadId || undefined,
+      selectedCodexThreadLabel: selectedCodexThreadLabel || undefined,
       title: title.trim(),
       description: description.trim() || undefined,
       status,
@@ -754,6 +939,7 @@ export function NewIssueDialog() {
     ? (agents ?? []).find((a) => a.id === selectedAssigneeAgentId)
     : null;
   const currentProject = orderedProjects.find((project) => project.id === projectId);
+  const projectRepoPath = repoPathForProject(currentProject, projectWorkspaceId);
   const currentProjectExecutionWorkspacePolicy =
     experimentalSettings?.enableIsolatedWorkspaces === true
       ? currentProject?.executionWorkspacePolicy ?? null
@@ -825,6 +1011,9 @@ export function NewIssueDialog() {
     const nextProject = orderedProjects.find((project) => project.id === nextProjectId);
     executionWorkspaceDefaultProjectId.current = nextProjectId || null;
     setProjectWorkspaceId(defaultProjectWorkspaceIdForProject(nextProject));
+    setRepoPath((current) => (current.trim().length > 0 ? current : repoPathForProject(nextProject)));
+    setSelectedCodexThreadId("");
+    setSelectedCodexThreadLabel("");
     setExecutionWorkspaceMode(defaultExecutionWorkspaceModeForProject(nextProject));
     setSelectedExecutionWorkspaceId("");
   }, [orderedProjects]);
@@ -837,6 +1026,7 @@ export function NewIssueDialog() {
     if (!project) return;
     executionWorkspaceDefaultProjectId.current = projectId;
     setProjectWorkspaceId(defaultProjectWorkspaceIdForProject(project));
+    setRepoPath((current) => (current.trim().length > 0 ? current : repoPathForProject(project)));
     setExecutionWorkspaceMode(defaultExecutionWorkspaceModeForProject(project));
     setSelectedExecutionWorkspaceId("");
   }, [newIssueOpen, orderedProjects, projectId]);
@@ -1116,6 +1306,125 @@ export function NewIssueDialog() {
                 }}
               />
             </div>
+          </div>
+        </div>
+
+        <div className="px-4 pb-2 shrink-0">
+          <div className="rounded-xl border border-border/70 bg-muted/10 p-3 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
+                  Repo attachment
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Attach a local repo so related Codex threads show up before the issue is created.
+                </p>
+              </div>
+              {assigneeAdapterType === "codex_local" ? (
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+                  Codex-linked
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                value={repoPath}
+                onChange={(event) => {
+                  setRepoPath(event.target.value);
+                  setSelectedCodexThreadId("");
+                  setSelectedCodexThreadLabel("");
+                }}
+                placeholder={projectRepoPath || "/absolute/path/to/repo"}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => pickRepoFolder.mutate()}
+                disabled={pickRepoFolder.isPending}
+              >
+                {pickRepoFolder.isPending ? "Opening..." : "Choose Folder"}
+              </Button>
+              {projectRepoPath ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => {
+                    setRepoPath(projectRepoPath);
+                    setSelectedCodexThreadId("");
+                    setSelectedCodexThreadLabel("");
+                  }}
+                >
+                  Use Project Repo
+                </Button>
+              ) : null}
+            </div>
+
+            {selectedCodexThreadId ? (
+              <div className="rounded-lg border border-border/70 bg-background/80 px-3 py-2 text-xs">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Selected Codex Thread</div>
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <div className="font-medium text-foreground">
+                    {selectedCodexThreadLabel || "Untitled thread"}
+                  </div>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setSelectedCodexThreadId("");
+                      setSelectedCodexThreadLabel("");
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {repoPath.trim().length > 0 ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Repo-related Codex Threads
+                  </p>
+                  {assigneeAdapterType === "codex_local" ? (
+                    <span className="text-[11px] text-muted-foreground">
+                      No selection means Paperclip will start a new shared Codex thread.
+                    </span>
+                  ) : null}
+                </div>
+                {(repoCodexThreads?.data?.length ?? 0) === 0 ? (
+                  <div className="rounded-lg border border-border/70 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+                    No recent Codex threads found for this repo yet.
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {(repoCodexThreads?.data ?? []).map((thread) => (
+                      <button
+                        key={thread.id}
+                        type="button"
+                        className={cn(
+                          "rounded-full border px-3 py-1.5 text-left text-xs transition-colors",
+                          selectedCodexThreadId === thread.id
+                            ? "border-foreground bg-accent text-foreground"
+                            : "border-border bg-background/70 text-foreground hover:bg-accent/50",
+                        )}
+                        onClick={() => {
+                          setSelectedCodexThreadId(thread.id);
+                          setSelectedCodexThreadLabel(thread.threadName ?? "");
+                        }}
+                      >
+                        {thread.threadName ?? "Untitled thread"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
         </div>
 

@@ -10,6 +10,7 @@ import {
   llmCheck,
   logCheck,
   portCheck,
+  runtimeSourcesCheck,
   secretsCheck,
   storageCheck,
   type CheckResult,
@@ -119,6 +120,11 @@ export async function doctor(opts: {
   const portResult = await portCheck(config);
   results.push(portResult);
   printResult(portResult);
+
+  // 10. Linked runtime sources check
+  const runtimeSourcesResult = runtimeSourcesCheck(config);
+  results.push(runtimeSourcesResult);
+  printResult(runtimeSourcesResult);
 
   // Summary
   return printSummary(results);

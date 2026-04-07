@@ -9,6 +9,9 @@ describe("normalizeRememberedInstanceSettingsPath", () => {
     expect(normalizeRememberedInstanceSettingsPath("/instance/settings/general")).toBe(
       "/instance/settings/general",
     );
+    expect(normalizeRememberedInstanceSettingsPath("/instance/settings/runtime-sources")).toBe(
+      "/instance/settings/runtime-sources",
+    );
     expect(normalizeRememberedInstanceSettingsPath("/instance/settings/experimental")).toBe(
       "/instance/settings/experimental",
     );

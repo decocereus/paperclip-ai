@@ -672,4 +672,119 @@ describe("codex execute", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
+
+  it("uses the linked runtimeSources codex home instead of a managed copy", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-linked-home-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "codex");
+    const capturePath = path.join(root, "capture.json");
+    const sharedCodexHome = path.join(root, "shared-codex-home");
+    const paperclipHome = path.join(root, "paperclip-home");
+    const configPath = path.join(root, "config.json");
+    const managedCodexHome = path.join(
+      paperclipHome,
+      "instances",
+      "default",
+      "companies",
+      "company-1",
+      "codex-home",
+    );
+    await fs.mkdir(workspace, { recursive: true });
+    await fs.mkdir(sharedCodexHome, { recursive: true });
+    await fs.writeFile(path.join(sharedCodexHome, "auth.json"), '{"token":"shared"}\n', "utf8");
+    await writeFakeCodexCommand(commandPath);
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        $meta: { version: 1, updatedAt: new Date().toISOString(), source: "configure" },
+        database: {
+          mode: "embedded-postgres",
+          embeddedPostgresDataDir: path.join(paperclipHome, "instances", "default", "db"),
+          embeddedPostgresPort: 54329,
+          backup: { enabled: true, intervalMinutes: 60, retentionDays: 30, dir: path.join(paperclipHome, "instances", "default", "data", "backups") },
+        },
+        logging: { mode: "file", logDir: path.join(paperclipHome, "instances", "default", "logs") },
+        server: { deploymentMode: "local_trusted", exposure: "private", host: "127.0.0.1", port: 3100, allowedHostnames: [], serveUi: true },
+        auth: { baseUrlMode: "auto", disableSignUp: false },
+        telemetry: { enabled: true },
+        storage: { provider: "local_disk", localDisk: { baseDir: path.join(paperclipHome, "instances", "default", "data", "storage") }, s3: { bucket: "paperclip", region: "us-east-1", prefix: "", forcePathStyle: false } },
+        secrets: { provider: "local_encrypted", strictMode: false, localEncrypted: { keyFilePath: path.join(paperclipHome, "instances", "default", "secrets", "master.key") } },
+        runtimeSources: {
+          codex: {
+            enabled: true,
+            mode: "linked",
+            homeDir: sharedCodexHome,
+          },
+        },
+      }, null, 2),
+      "utf8",
+    );
+
+    const previousHome = process.env.HOME;
+    const previousPaperclipHome = process.env.PAPERCLIP_HOME;
+    const previousPaperclipConfig = process.env.PAPERCLIP_CONFIG;
+    const previousPaperclipInstanceId = process.env.PAPERCLIP_INSTANCE_ID;
+    const previousCodexHome = process.env.CODEX_HOME;
+    process.env.HOME = root;
+    process.env.PAPERCLIP_HOME = paperclipHome;
+    process.env.PAPERCLIP_CONFIG = configPath;
+    delete process.env.PAPERCLIP_INSTANCE_ID;
+    delete process.env.CODEX_HOME;
+
+    try {
+      const logs: LogEntry[] = [];
+      const result = await execute({
+        runId: "run-linked",
+        agent: {
+          id: "agent-1",
+          companyId: "company-1",
+          name: "Codex Coder",
+          adapterType: "codex_local",
+          adapterConfig: {},
+        },
+        runtime: {
+          sessionId: null,
+          sessionParams: null,
+          sessionDisplayId: null,
+          taskKey: null,
+        },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+          env: {
+            PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
+          },
+          promptTemplate: "Follow the paperclip heartbeat.",
+        },
+        context: {},
+        authToken: "run-jwt-token",
+        onLog: async (stream, chunk) => {
+          logs.push({ stream, chunk });
+        },
+      });
+
+      expect(result.exitCode).toBe(0);
+      const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
+      expect(capture.codexHome).toBe(sharedCodexHome);
+      await expect(fs.lstat(managedCodexHome)).rejects.toThrow();
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          stream: "stdout",
+          chunk: expect.stringContaining("Using linked Codex home"),
+        }),
+      );
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousPaperclipHome === undefined) delete process.env.PAPERCLIP_HOME;
+      else process.env.PAPERCLIP_HOME = previousPaperclipHome;
+      if (previousPaperclipConfig === undefined) delete process.env.PAPERCLIP_CONFIG;
+      else process.env.PAPERCLIP_CONFIG = previousPaperclipConfig;
+      if (previousPaperclipInstanceId === undefined) delete process.env.PAPERCLIP_INSTANCE_ID;
+      else process.env.PAPERCLIP_INSTANCE_ID = previousPaperclipInstanceId;
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodexHome;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 });

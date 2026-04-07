@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { and, asc, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { companySkills } from "@paperclipai/db";
+import { companies, companySkills } from "@paperclipai/db";
 import { readPaperclipSkillSyncPreference, writePaperclipSkillSyncPreference } from "@paperclipai/adapter-utils/server-utils";
 import type { PaperclipSkillEntry } from "@paperclipai/adapter-utils/server-utils";
 import type {
@@ -1459,6 +1459,15 @@ export function companySkillService(db: Db) {
   const projects = projectService(db);
   const secretsSvc = secretService(db);
 
+  async function assertCompanyExists(companyId: string) {
+    const company = await db
+      .select({ id: companies.id })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .then((rows) => rows[0] ?? null);
+    if (!company) throw notFound("Company not found");
+  }
+
   async function ensureBundledSkills(companyId: string) {
     for (const skillsRoot of resolveBundledSkillsRoot()) {
       const stats = await fs.stat(skillsRoot).catch(() => null);
@@ -1526,6 +1535,7 @@ export function companySkillService(db: Db) {
   }
 
   async function list(companyId: string): Promise<CompanySkillListItem[]> {
+    await assertCompanyExists(companyId);
     const rows = await listFull(companyId);
     const agentRows = await agents.list(companyId);
     return rows.map((skill) => {
@@ -1538,6 +1548,7 @@ export function companySkillService(db: Db) {
   }
 
   async function listFull(companyId: string): Promise<CompanySkill[]> {
+    await assertCompanyExists(companyId);
     await ensureSkillInventoryCurrent(companyId);
     const rows = await db
       .select()

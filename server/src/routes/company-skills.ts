@@ -8,8 +8,8 @@ import {
 } from "@paperclipai/shared";
 import { trackSkillImported } from "@paperclipai/shared/telemetry";
 import { validate } from "../middleware/validate.js";
-import { accessService, agentService, companySkillService, logActivity } from "../services/index.js";
-import { forbidden } from "../errors.js";
+import { accessService, agentService, companyService, companySkillService, logActivity } from "../services/index.js";
+import { forbidden, notFound } from "../errors.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 import { getTelemetryClient } from "../telemetry.js";
 
@@ -25,6 +25,7 @@ export function companySkillRoutes(db: Db) {
   const router = Router();
   const agents = agentService(db);
   const access = accessService(db);
+  const companies = companyService(db);
   const svc = companySkillService(db);
 
   function canCreateAgents(agent: { permissions: Record<string, unknown> | null | undefined }) {
@@ -81,9 +82,18 @@ export function companySkillRoutes(db: Db) {
     throw forbidden("Missing permission: can create agents");
   }
 
+  async function ensureCompanyExists(companyId: string) {
+    const company = await companies.getById(companyId);
+    if (!company) {
+      throw notFound("Company not found");
+    }
+    return company;
+  }
+
   router.get("/companies/:companyId/skills", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
+    await ensureCompanyExists(companyId);
     const result = await svc.list(companyId);
     res.json(result);
   });
@@ -92,6 +102,7 @@ export function companySkillRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     const skillId = req.params.skillId as string;
     assertCompanyAccess(req, companyId);
+    await ensureCompanyExists(companyId);
     const result = await svc.detail(companyId, skillId);
     if (!result) {
       res.status(404).json({ error: "Skill not found" });
@@ -104,6 +115,7 @@ export function companySkillRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     const skillId = req.params.skillId as string;
     assertCompanyAccess(req, companyId);
+    await ensureCompanyExists(companyId);
     const result = await svc.updateStatus(companyId, skillId);
     if (!result) {
       res.status(404).json({ error: "Skill not found" });
@@ -117,6 +129,7 @@ export function companySkillRoutes(db: Db) {
     const skillId = req.params.skillId as string;
     const relativePath = String(req.query.path ?? "SKILL.md");
     assertCompanyAccess(req, companyId);
+    await ensureCompanyExists(companyId);
     const result = await svc.readFile(companyId, skillId, relativePath);
     if (!result) {
       res.status(404).json({ error: "Skill not found" });

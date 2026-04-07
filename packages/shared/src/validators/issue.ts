@@ -98,6 +98,30 @@ export const linkIssueApprovalSchema = z.object({
 
 export type LinkIssueApproval = z.infer<typeof linkIssueApprovalSchema>;
 
+export const issueRuntimeKindSchema = z.enum(["codex", "openclaw"]);
+
+export const upsertIssueRuntimeLinkSchema = z.object({
+  runtimeKind: issueRuntimeKindSchema,
+  externalConversationId: z.string().trim().min(1).max(255),
+  externalConversationLabel: z.string().trim().max(255).nullable().optional(),
+  metadataJson: z.record(z.unknown()).nullable().optional(),
+});
+
+export type UpsertIssueRuntimeLink = z.infer<typeof upsertIssueRuntimeLinkSchema>;
+
+export const resolveIssueConversationApprovalSchema = z.object({
+  decision: z.enum(["accept", "acceptForSession", "decline", "cancel"]),
+});
+
+export type ResolveIssueConversationApproval = z.infer<typeof resolveIssueConversationApprovalSchema>;
+
+export const startIssueCodexThreadSchema = z.object({
+  cwd: z.string().trim().min(1),
+  name: z.string().trim().max(255).nullable().optional(),
+});
+
+export type StartIssueCodexThread = z.infer<typeof startIssueCodexThreadSchema>;
+
 export const createIssueAttachmentMetadataSchema = z.object({
   issueCommentId: z.string().uuid().optional().nullable(),
 });

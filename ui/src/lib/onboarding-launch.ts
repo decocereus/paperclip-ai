@@ -24,11 +24,22 @@ export function selectDefaultCompanyGoalId(goals: Goal[]): string | null {
   );
 }
 
-export function buildOnboardingProjectPayload(goalId: string | null) {
+export function buildOnboardingProjectPayload(goalId: string | null, repoPath?: string | null) {
+  const trimmedRepoPath = repoPath?.trim() ?? "";
   return {
     name: ONBOARDING_PROJECT_NAME,
     status: "in_progress" as const,
     ...(goalId ? { goalIds: [goalId] } : {}),
+    ...(trimmedRepoPath
+      ? {
+        workspace: {
+          name: "repo",
+          sourceType: "local_path" as const,
+          cwd: trimmedRepoPath,
+          isPrimary: true,
+        },
+      }
+      : {}),
   };
 }
 
@@ -37,6 +48,7 @@ export function buildOnboardingIssuePayload(input: {
   description: string;
   assigneeAgentId: string;
   projectId: string;
+  projectWorkspaceId?: string | null;
   goalId: string | null;
 }) {
   const title = input.title.trim();
@@ -47,6 +59,7 @@ export function buildOnboardingIssuePayload(input: {
     ...(description ? { description } : {}),
     assigneeAgentId: input.assigneeAgentId,
     projectId: input.projectId,
+    ...(input.projectWorkspaceId ? { projectWorkspaceId: input.projectWorkspaceId } : {}),
     ...(input.goalId ? { goalId: input.goalId } : {}),
     status: "todo" as const,
   };

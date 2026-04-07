@@ -4122,6 +4122,27 @@ export function heartbeatService(db: Db) {
       };
     },
 
+    setTaskSession: async (input: {
+      companyId: string;
+      agentId: string;
+      adapterType: string;
+      taskKey: string;
+      sessionParamsJson: Record<string, unknown> | null;
+      sessionDisplayId: string | null;
+      lastRunId?: string | null;
+      lastError?: string | null;
+    }) =>
+      upsertTaskSession({
+        companyId: input.companyId,
+        agentId: input.agentId,
+        adapterType: input.adapterType,
+        taskKey: input.taskKey,
+        sessionParamsJson: input.sessionParamsJson,
+        sessionDisplayId: input.sessionDisplayId,
+        lastRunId: input.lastRunId ?? null,
+        lastError: input.lastError ?? null,
+      }),
+
     listEvents: (runId: string, afterSeq = 0, limit = 200) =>
       db
         .select()

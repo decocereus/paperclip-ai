@@ -9,6 +9,8 @@ import type {
   IssueComment,
   IssueDocument,
   IssueLabel,
+  IssueConversationSnapshot,
+  IssueRuntimeLink,
   IssueWorkProduct,
   UpsertIssueDocument,
 } from "@paperclipai/shared";
@@ -134,6 +136,37 @@ export const issuesApi = {
   },
   deleteAttachment: (id: string) => api.delete<{ ok: true }>(`/attachments/${id}`),
   listApprovals: (id: string) => api.get<Approval[]>(`/issues/${id}/approvals`),
+  getRuntimeLink: (id: string) => api.get<IssueRuntimeLink | null>(`/issues/${id}/runtime-link`),
+  getConversation: (id: string, limit = 50) =>
+    api.get<IssueConversationSnapshot>(`/issues/${id}/conversation?limit=${encodeURIComponent(String(limit))}`),
+  sendConversation: (id: string, body: string) =>
+    api.post<{ comment: IssueComment }>(`/issues/${id}/conversation/send`, { body }),
+  steerConversation: (id: string, body: string) =>
+    api.post<{ comment: IssueComment }>(`/issues/${id}/conversation/steer`, { body }),
+  interruptConversation: (id: string) =>
+    api.post<{ interruptedRunId: string | null }>(`/issues/${id}/conversation/interrupt`, {}),
+  resolveConversationApproval: (
+    id: string,
+    requestId: string,
+    decision: "accept" | "acceptForSession" | "decline" | "cancel",
+  ) =>
+    api.post<{ ok: true }>(`/issues/${id}/conversation/approvals/${encodeURIComponent(requestId)}/resolve`, {
+      decision,
+    }),
+  upsertRuntimeLink: (
+    id: string,
+    data: {
+      runtimeKind: "codex" | "openclaw";
+      externalConversationId: string;
+      externalConversationLabel?: string | null;
+      metadataJson?: Record<string, unknown> | null;
+    },
+  ) => api.put<IssueRuntimeLink>(`/issues/${id}/runtime-link`, data),
+  startCodexThreadForIssue: (
+    id: string,
+    data: { cwd: string; name?: string | null },
+  ) => api.post<IssueRuntimeLink>(`/issues/${id}/runtime-link/start-codex-thread`, data),
+  deleteRuntimeLink: (id: string) => api.delete<{ ok: true }>(`/issues/${id}/runtime-link`),
   linkApproval: (id: string, approvalId: string) =>
     api.post<Approval[]>(`/issues/${id}/approvals`, { approvalId }),
   unlinkApproval: (id: string, approvalId: string) =>

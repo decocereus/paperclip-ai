@@ -48,6 +48,7 @@ import {
 } from "@paperclipai/adapter-opencode-local";
 import {
   execute as openclawGatewayExecute,
+  sessionCodec as openclawGatewaySessionCodec,
   testEnvironment as openclawGatewayTestEnvironment,
 } from "@paperclipai/adapter-openclaw-gateway/server";
 import {
@@ -145,6 +146,8 @@ const openclawGatewayAdapter: ServerAdapterModule = {
   type: "openclaw_gateway",
   execute: openclawGatewayExecute,
   testEnvironment: openclawGatewayTestEnvironment,
+  sessionCodec: openclawGatewaySessionCodec,
+  sessionManagement: getAdapterSessionManagement("openclaw_gateway") ?? undefined,
   models: openclawGatewayModels,
   supportsLocalAgentJwt: false,
   agentConfigurationDoc: openclawGatewayAgentConfigurationDoc,

@@ -38,6 +38,10 @@ import {
   trackInstallStarted,
   trackInstallCompleted,
 } from "../telemetry.js";
+import {
+  buildLinkedRuntimeSourcesConfig,
+  detectRuntimeSources,
+} from "@paperclipai/shared/runtime-sources";
 
 type SetupMode = "quickstart" | "advanced";
 
@@ -503,6 +507,43 @@ export async function onboard(opts: OnboardOptions): Promise<void> {
     secrets,
   };
 
+  const discoveredRuntimeSources = detectRuntimeSources(process.env);
+  const availableRuntimeSources = discoveredRuntimeSources.filter((entry) => entry.status === "available");
+  if (availableRuntimeSources.length > 0) {
+    let shouldLinkRuntimeSources = opts.yes === true || opts.invokedByRun === true;
+
+    if (
+      !shouldLinkRuntimeSources &&
+      !opts.invokedByRun &&
+      process.stdin.isTTY &&
+      process.stdout.isTTY
+    ) {
+      const answer = await p.confirm({
+        message: `Link detected local runtime homes now? (${availableRuntimeSources.map((entry) => entry.kind).join(", ")})`,
+        initialValue: true,
+      });
+      if (!p.isCancel(answer)) {
+        shouldLinkRuntimeSources = answer;
+      }
+    }
+
+    if (shouldLinkRuntimeSources) {
+      config.runtimeSources = buildLinkedRuntimeSourcesConfig({
+        current: config.runtimeSources,
+        discovered: discoveredRuntimeSources,
+      });
+      p.log.success(
+        `Linked local runtime sources: ${availableRuntimeSources.map((entry) => entry.kind).join(", ")}`,
+      );
+    } else {
+      p.log.message(
+        pc.dim(
+          `Detected local runtime homes (${availableRuntimeSources.map((entry) => entry.kind).join(", ")}). You can link them later with ${pc.cyan("paperclipai sources link")}.`,
+        ),
+      );
+    }
+  }
+
   const keyResult = ensureLocalSecretsKeyFile(config, configPath);
   if (keyResult.status === "created") {
     p.log.success(`Created local secrets key file at ${pc.dim(keyResult.path)}`);
@@ -527,6 +568,7 @@ export async function onboard(opts: OnboardOptions): Promise<void> {
       `Storage: ${storage.provider}`,
       `Secrets: ${secrets.provider} (strict mode ${secrets.strictMode ? "on" : "off"})`,
       "Agent auth: PAPERCLIP_AGENT_JWT_SECRET configured",
+      `Runtime sources: ${config.runtimeSources ? Object.keys(config.runtimeSources).join(", ") : "not linked"}`,
     ].join("\n"),
     "Configuration saved",
   );

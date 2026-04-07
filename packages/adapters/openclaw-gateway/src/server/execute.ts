@@ -1097,9 +1097,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const sessionKeyStrategy = normalizeSessionKeyStrategy(ctx.config.sessionKeyStrategy);
   const configuredSessionKey = nonEmpty(ctx.config.sessionKey);
+  const runtimeSessionParams = parseObject(ctx.runtime.sessionParams);
+  const runtimeSessionKey =
+    nonEmpty(runtimeSessionParams.sessionKey) ??
+    nonEmpty(runtimeSessionParams.session_key);
   const sessionKey = resolveSessionKey({
-    strategy: sessionKeyStrategy,
+    strategy: runtimeSessionKey ? "fixed" : sessionKeyStrategy,
     configuredSessionKey,
+    ...(runtimeSessionKey ? { configuredSessionKey: runtimeSessionKey } : {}),
     runId: ctx.runId,
     issueId: wakePayload.issueId,
   });
@@ -1400,6 +1405,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         exitCode: 0,
         signal: null,
         timedOut: false,
+        sessionId: sessionKey,
+        sessionParams: { sessionKey },
+        sessionDisplayId: sessionKey,
         provider,
         ...(model ? { model } : {}),
         ...(usage ? { usage } : {}),
@@ -1460,6 +1468,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         exitCode: 1,
         signal: null,
         timedOut,
+        sessionId: sessionKey,
+        sessionParams: { sessionKey },
+        sessionDisplayId: sessionKey,
         errorMessage: detailedMessage,
         errorCode: timedOut
           ? "openclaw_gateway_timeout"

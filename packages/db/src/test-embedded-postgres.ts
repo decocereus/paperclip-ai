@@ -3,6 +3,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { applyPendingMigrations, ensurePostgresDatabase } from "./client.js";
+import { hydrateEmbeddedPostgresRuntimeSymlinks } from "./embedded-postgres-symlinks.js";
 
 type EmbeddedPostgresInstance = {
   initialise(): Promise<void>;
@@ -34,6 +35,7 @@ export type EmbeddedPostgresTestDatabase = {
 let embeddedPostgresSupportPromise: Promise<EmbeddedPostgresTestSupport> | null = null;
 
 async function getEmbeddedPostgresCtor(): Promise<EmbeddedPostgresCtor> {
+  await hydrateEmbeddedPostgresRuntimeSymlinks();
   const mod = await import("embedded-postgres");
   return mod.default as EmbeddedPostgresCtor;
 }

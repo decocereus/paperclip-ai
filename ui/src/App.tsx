@@ -1,10 +1,11 @@
-import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "@/lib/router";
+import { Link, Navigate, Outlet, Route, Routes, useLocation, useParams } from "@/lib/router";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Layout } from "./components/Layout";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { authApi } from "./api/auth";
 import { healthApi } from "./api/health";
+import { runtimeSourcesApi } from "./api/runtimeSources";
 import { Dashboard } from "./pages/Dashboard";
 import { Companies } from "./pages/Companies";
 import { Agents } from "./pages/Agents";
@@ -32,6 +33,7 @@ import { DesignGuide } from "./pages/DesignGuide";
 import { InstanceGeneralSettings } from "./pages/InstanceGeneralSettings";
 import { InstanceSettings } from "./pages/InstanceSettings";
 import { InstanceExperimentalSettings } from "./pages/InstanceExperimentalSettings";
+import { InstanceRuntimeSourcesSettings } from "./pages/InstanceRuntimeSourcesSettings";
 import { PluginManager } from "./pages/PluginManager";
 import { PluginSettings } from "./pages/PluginSettings";
 import { AdapterManager } from "./pages/AdapterManager";
@@ -210,10 +212,38 @@ function OnboardingRoutePage() {
     : companies.length > 0
       ? "Run onboarding again to create another company and seed its first agent."
       : "Get started by creating a company and your first agent.";
+  const runtimeSourcesQuery = useQuery({
+    queryKey: queryKeys.instance.runtimeSources,
+    queryFn: () => runtimeSourcesApi.get(),
+  });
+  const discoveryQuery = useQuery({
+    queryKey: queryKeys.instance.runtimeSourcesDiscovery,
+    queryFn: () => runtimeSourcesApi.discover(),
+  });
+  const availableDetectedSources = (discoveryQuery.data?.data ?? []).filter((entry) => entry.status === "available");
+  const shouldShowRuntimeSourcesPrompt =
+    !runtimeSourcesQuery.data &&
+    availableDetectedSources.length > 0;
 
   return (
     <div className="mx-auto max-w-xl py-10">
-      <div className="rounded-lg border border-border bg-card p-6">
+      <div className="space-y-4">
+        {shouldShowRuntimeSourcesPrompt ? (
+          <div className="rounded-lg border border-border bg-card p-6">
+            <h2 className="text-base font-semibold">Local agent state detected</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Paperclip found existing local runtime homes on this machine for{" "}
+              {availableDetectedSources.map((entry) => entry.kind).join(", ")}. Linking them first keeps existing sessions, skills, plugins, and memory canonical in their native homes.
+            </p>
+            <div className="mt-4">
+              <Button variant="outline" asChild>
+                <Link to="/instance/settings/runtime-sources">Review Runtime Sources</Link>
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="rounded-lg border border-border bg-card p-6">
         <h1 className="text-xl font-semibold">{title}</h1>
         <p className="mt-2 text-sm text-muted-foreground">{description}</p>
         <div className="mt-4">
@@ -226,6 +256,7 @@ function OnboardingRoutePage() {
           >
             {matchedCompany ? "Add Agent" : "Start Onboarding"}
           </Button>
+        </div>
         </div>
       </div>
     </div>
@@ -319,6 +350,7 @@ export function App() {
           <Route path="instance/settings" element={<Layout />}>
             <Route index element={<Navigate to="general" replace />} />
             <Route path="general" element={<InstanceGeneralSettings />} />
+            <Route path="runtime-sources" element={<InstanceRuntimeSourcesSettings />} />
             <Route path="heartbeats" element={<InstanceSettings />} />
             <Route path="experimental" element={<InstanceExperimentalSettings />} />
             <Route path="plugins" element={<PluginManager />} />

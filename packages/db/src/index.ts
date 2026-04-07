@@ -29,5 +29,6 @@ export {
   createEmbeddedPostgresLogBuffer,
   formatEmbeddedPostgresError,
 } from "./embedded-postgres-error.js";
+export { hydrateEmbeddedPostgresRuntimeSymlinks } from "./embedded-postgres-symlinks.js";
 export { issueRelations } from "./schema/issue_relations.js";
 export * from "./schema/index.js";

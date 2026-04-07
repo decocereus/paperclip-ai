@@ -15,6 +15,10 @@ const mockAccessService = vi.hoisted(() => ({
 
 const mockCompanySkillService = vi.hoisted(() => ({
   importFromSource: vi.fn(),
+  list: vi.fn(),
+}));
+const mockCompanyService = vi.hoisted(() => ({
+  getById: vi.fn(),
 }));
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
@@ -38,6 +42,7 @@ vi.mock("../telemetry.js", () => ({
 vi.mock("../services/index.js", () => ({
   accessService: () => mockAccessService,
   agentService: () => mockAgentService,
+  companyService: () => mockCompanyService,
   companySkillService: () => mockCompanySkillService,
   logActivity: mockLogActivity,
 }));
@@ -62,6 +67,8 @@ describe("company skill mutation permissions", () => {
       imported: [],
       warnings: [],
     });
+    mockCompanySkillService.list.mockResolvedValue([]);
+    mockCompanyService.getById.mockResolvedValue({ id: "company-1" });
     mockLogActivity.mockResolvedValue(undefined);
     mockAccessService.canUser.mockResolvedValue(true);
     mockAccessService.hasPermission.mockResolvedValue(false);
@@ -83,6 +90,22 @@ describe("company skill mutation permissions", () => {
       "company-1",
       "https://github.com/vercel-labs/agent-browser",
     );
+  });
+
+  it("returns 404 for stale company skill requests when the company no longer exists", async () => {
+    mockCompanyService.getById.mockResolvedValue(null);
+
+    const res = await request(createApp({
+      type: "board",
+      userId: "local-board",
+      companyIds: ["company-1"],
+      source: "local_implicit",
+      isInstanceAdmin: false,
+    }))
+      .get("/api/companies/company-1/skills");
+
+    expect(res.status).toBe(404);
+    expect(mockCompanySkillService.list).not.toHaveBeenCalled();
   });
 
   it("tracks public GitHub skill imports with an explicit skill reference", async () => {
