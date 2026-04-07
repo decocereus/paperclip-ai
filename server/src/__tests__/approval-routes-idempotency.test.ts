@@ -107,4 +107,34 @@ describe("approval routes idempotent retries", () => {
     expect(res.status).toBe(200);
     expect(mockLogActivity).not.toHaveBeenCalled();
   });
+
+  it("includes payloadAgentId in approval activity details for hire approvals", async () => {
+    mockApprovalService.approve.mockResolvedValue({
+      approval: {
+        id: "approval-1",
+        companyId: "company-1",
+        type: "hire_agent",
+        status: "approved",
+        payload: { agentId: "agent-1" },
+        requestedByAgentId: null,
+      },
+      applied: true,
+    });
+
+    const res = await request(createApp())
+      .post("/api/approvals/approval-1/approve")
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "approval.approved",
+        entityType: "approval",
+        details: expect.objectContaining({
+          payloadAgentId: "agent-1",
+        }),
+      }),
+    );
+  });
 });

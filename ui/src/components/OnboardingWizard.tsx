@@ -40,6 +40,7 @@ import {
 } from "@paperclipai/adapter-codex-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
+import { DEFAULT_OPENCLAW_GATEWAY_URL } from "@paperclipai/adapter-openclaw-gateway";
 import { resolveRouteOnboardingOptions } from "../lib/onboarding-route";
 import { AsciiArtAnimation } from "./AsciiArtAnimation";
 import {
@@ -112,6 +113,7 @@ export function OnboardingWizard() {
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [url, setUrl] = useState("");
+  const [openclawGatewayToken, setOpenclawGatewayToken] = useState("");
   const [adapterEnvResult, setAdapterEnvResult] =
     useState<AdapterEnvironmentTestResult | null>(null);
   const [adapterEnvError, setAdapterEnvError] = useState<string | null>(null);
@@ -201,6 +203,12 @@ export function OnboardingWizard() {
     queryFn: () => agentsApi.adapterModels(createdCompanyId!, adapterType),
     enabled: Boolean(createdCompanyId) && effectiveOnboardingOpen && step === 2
   });
+  const { data: openClawGatewayTokenResult } = useQuery({
+    queryKey: queryKeys.instance.runtimeSourcesOpenClawGatewayToken,
+    queryFn: () => runtimeSourcesApi.openclawGatewayToken(),
+    enabled: effectiveOnboardingOpen && step === 2 && adapterType === "openclaw_gateway",
+    retry: false,
+  });
   const NONLOCAL_TYPES = new Set(["process", "http", "openclaw_gateway"]);
   const isLocalAdapter = !NONLOCAL_TYPES.has(adapterType);
 
@@ -234,6 +242,14 @@ export function OnboardingWizard() {
     setAdapterEnvResult(null);
     setAdapterEnvError(null);
   }, [step, adapterType, model, command, args, url]);
+
+  useEffect(() => {
+    if (adapterType !== "openclaw_gateway") return;
+    const token = openClawGatewayTokenResult?.token?.trim() ?? "";
+    if (!token) return;
+    setOpenclawGatewayToken((current) => current || token);
+    setUrl((current) => current || DEFAULT_OPENCLAW_GATEWAY_URL);
+  }, [adapterType, openClawGatewayTokenResult?.token]);
 
   const selectedModel = (adapterModels ?? []).find((m) => m.id === model);
   const hasAnthropicApiKeyOverrideCheck =
@@ -293,6 +309,7 @@ export function OnboardingWizard() {
     setCommand("");
     setArgs("");
     setUrl("");
+    setOpenclawGatewayToken("");
     setAdapterEnvResult(null);
     setAdapterEnvError(null);
     setAdapterEnvLoading(false);
@@ -330,6 +347,7 @@ export function OnboardingWizard() {
       command,
       args,
       url,
+      openclawGatewayToken,
       dangerouslySkipPermissions:
         adapterType === "claude_local" || adapterType === "opencode_local",
       dangerouslyBypassSandbox:
@@ -804,6 +822,9 @@ export function OnboardingWizard() {
                             if (nextType === "codex_local" && !model) {
                               setModel(DEFAULT_CODEX_LOCAL_MODEL);
                             }
+                            if (nextType === "openclaw_gateway" && !url) {
+                              setUrl(DEFAULT_OPENCLAW_GATEWAY_URL);
+                            }
                             if (nextType !== "codex_local") {
                               setModel("");
                             }
@@ -867,6 +888,9 @@ export function OnboardingWizard() {
                                   setModel("");
                                 }
                                 return;
+                              }
+                              if (nextType === "openclaw_gateway" && !url) {
+                                setUrl(DEFAULT_OPENCLAW_GATEWAY_URL);
                               }
                               setModel("");
                             }}
@@ -1117,7 +1141,7 @@ export function OnboardingWizard() {
                         className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
                         placeholder={
                           adapterType === "openclaw_gateway"
-                            ? "ws://127.0.0.1:18789"
+                            ? DEFAULT_OPENCLAW_GATEWAY_URL
                             : "https://..."
                         }
                         value={url}

@@ -1,4 +1,5 @@
 import type { CreateConfigValues } from "@paperclipai/adapter-utils";
+import { DEFAULT_OPENCLAW_GATEWAY_URL } from "../index.js";
 
 function parseJsonObject(text: string): Record<string, unknown> | null {
   const trimmed = text.trim();
@@ -14,7 +15,12 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
 
 export function buildOpenClawGatewayConfig(v: CreateConfigValues): Record<string, unknown> {
   const ac: Record<string, unknown> = {};
-  if (v.url) ac.url = v.url;
+  ac.url = v.url?.trim() || DEFAULT_OPENCLAW_GATEWAY_URL;
+  if (v.openclawGatewayToken?.trim()) {
+    ac.headers = {
+      "x-openclaw-token": v.openclawGatewayToken.trim(),
+    };
+  }
   ac.timeoutSec = 120;
   ac.waitTimeoutMs = 120000;
   ac.sessionKeyStrategy = "issue";

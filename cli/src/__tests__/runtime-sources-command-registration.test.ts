@@ -11,7 +11,7 @@ describe("registerRuntimeSourceCommands", () => {
     const sources = program.commands.find((command) => command.name() === "sources");
     expect(sources).toBeDefined();
     expect(sources?.commands.map((command) => command.name())).toEqual(
-      expect.arrayContaining(["detect", "show", "link"]),
+      expect.arrayContaining(["detect", "show", "link", "openclaw-token"]),
     );
   });
 });

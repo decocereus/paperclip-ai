@@ -1,5 +1,7 @@
 import { Router, type Request } from "express";
 import { execFile as execFileCallback } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { promisify } from "node:util";
 import type { Db } from "@paperclipai/db";
 import { runtimeSourcesConfigSchema } from "@paperclipai/shared";
@@ -34,6 +36,19 @@ export async function pickDirectoryViaOsascript(prompt: string): Promise<{ path:
 
 export const instanceRuntimeSourcesRouteInternals = {
   pickDirectoryViaOsascript,
+  readOpenClawGatewayToken(homeDir: string): string | null {
+    const configPath = path.join(homeDir, "openclaw.json");
+    if (!fs.existsSync(configPath)) return null;
+
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const gateway = (parsed as Record<string, unknown>).gateway;
+    if (typeof gateway !== "object" || gateway === null || Array.isArray(gateway)) return null;
+    const auth = (gateway as Record<string, unknown>).auth;
+    if (typeof auth !== "object" || auth === null || Array.isArray(auth)) return null;
+    const token = (auth as Record<string, unknown>).token;
+    return typeof token === "string" && token.trim().length > 0 ? token.trim() : null;
+  },
 };
 
 function assertBoardRead(req: Request) {
@@ -150,6 +165,22 @@ export function instanceRuntimeSourcesRoutes(db: Db) {
     res.json({
       data: homeDir ? readOpenClawSkills(homeDir, limit) : [],
     });
+  });
+
+  router.get("/instance/runtime-sources/openclaw/gateway-token", async (req, res) => {
+    assertCanManageInstanceConfig(req);
+    const config = readConfigFile();
+    const homeDir = config?.runtimeSources?.openclaw?.homeDir;
+    if (!homeDir) {
+      res.json({ token: null });
+      return;
+    }
+
+    try {
+      res.json({ token: instanceRuntimeSourcesRouteInternals.readOpenClawGatewayToken(homeDir) });
+    } catch {
+      res.json({ token: null });
+    }
   });
 
   router.patch(

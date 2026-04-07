@@ -1,10 +1,13 @@
 import * as p from "@clack/prompts";
+import fs from "node:fs";
+import path from "node:path";
 import { Command } from "commander";
 import pc from "picocolors";
 import type { RuntimeSourceMode } from "@paperclipai/shared";
 import {
   buildLinkedRuntimeSourcesConfig,
   detectRuntimeSources,
+  resolveOpenClawHomeDir,
   type RuntimeSourceDiscovery,
   type RuntimeSourceLinkOverrides,
 } from "@paperclipai/shared/runtime-sources";
@@ -73,6 +76,56 @@ type LinkOptions = DetectShowOptions & {
   openclawHome?: string;
   openclawMode?: RuntimeSourceMode;
 };
+
+type OpenClawTokenOptions = DetectShowOptions & {
+  shell?: boolean;
+  header?: boolean;
+};
+
+function resolveConfiguredOpenClawHome(configPath?: string): string {
+  const config = readConfig(configPath);
+  return config?.runtimeSources?.openclaw?.homeDir ?? resolveOpenClawHomeDir(process.env);
+}
+
+function readOpenClawGatewayToken(homeDir: string): { configPath: string; token: string } {
+  const configPath = path.join(homeDir, "openclaw.json");
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`OpenClaw config not found at ${configPath}.`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Failed to parse OpenClaw config at ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const token =
+    typeof parsed === "object" &&
+    parsed !== null &&
+    !Array.isArray(parsed) &&
+    typeof (parsed as Record<string, unknown>).gateway === "object" &&
+    (parsed as Record<string, unknown>).gateway !== null &&
+    !Array.isArray((parsed as Record<string, unknown>).gateway) &&
+    typeof ((parsed as Record<string, unknown>).gateway as Record<string, unknown>).auth === "object" &&
+    ((parsed as Record<string, unknown>).gateway as Record<string, unknown>).auth !== null &&
+    !Array.isArray(((parsed as Record<string, unknown>).gateway as Record<string, unknown>).auth) &&
+    typeof (((parsed as Record<string, unknown>).gateway as Record<string, unknown>).auth as Record<string, unknown>).token === "string"
+      ? ((((parsed as Record<string, unknown>).gateway as Record<string, unknown>).auth as Record<string, unknown>).token as string).trim()
+      : "";
+
+  if (!token) {
+    throw new Error(`OpenClaw gateway token missing in ${configPath} at gateway.auth.token.`);
+  }
+
+  return { configPath, token };
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
 
 export async function detectRuntimeSourcesCommand(opts: DetectShowOptions): Promise<void> {
   const discovered = detectRuntimeSources();
@@ -180,6 +233,28 @@ export async function linkRuntimeSourcesCommand(opts: LinkOptions): Promise<void
   p.outro(pc.dim("Restart the Paperclip server after changing linked runtime sources."));
 }
 
+export async function showOpenClawGatewayTokenCommand(opts: OpenClawTokenOptions): Promise<void> {
+  const homeDir = resolveConfiguredOpenClawHome(opts.config);
+  const { configPath, token } = readOpenClawGatewayToken(homeDir);
+
+  if (opts.json) {
+    console.log(JSON.stringify({ homeDir, configPath, token }, null, 2));
+    return;
+  }
+
+  if (opts.shell) {
+    console.log(`export OPENCLAW_GATEWAY_TOKEN=${shellQuote(token)}`);
+    return;
+  }
+
+  if (opts.header) {
+    console.log(`x-openclaw-token: ${token}`);
+    return;
+  }
+
+  console.log(token);
+}
+
 export function registerRuntimeSourceCommands(program: Command) {
   const sources = program.command("sources").description("Discover and link local runtime homes");
 
@@ -212,4 +287,14 @@ export function registerRuntimeSourceCommands(program: Command) {
     .option("--openclaw-mode <mode>", "OpenClaw source mode (linked|managed)", runtimeSourceModeParser)
     .option("--json", "Print resulting runtime source config as JSON", false)
     .action(linkRuntimeSourcesCommand);
+
+  sources
+    .command("openclaw-token")
+    .description("Print the local OpenClaw gateway token from the linked OpenClaw home")
+    .option("-c, --config <path>", "Path to config file")
+    .option("-d, --data-dir <path>", DATA_DIR_OPTION_HELP)
+    .option("--json", "Print token metadata as JSON", false)
+    .option("--shell", "Print a shell export command for OPENCLAW_GATEWAY_TOKEN", false)
+    .option("--header", "Print an x-openclaw-token header line", false)
+    .action(showOpenClawGatewayTokenCommand);
 }

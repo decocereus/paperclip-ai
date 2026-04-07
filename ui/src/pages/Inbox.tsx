@@ -1138,9 +1138,15 @@ export function Inbox() {
 
   const approveMutation = useMutation({
     mutationFn: (id: string) => approvalsApi.approve(id),
-    onSuccess: (_approval, id) => {
+    onSuccess: (approval, id) => {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(selectedCompanyId!) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+      const payloadAgentId =
+        typeof approval.payload?.agentId === "string" ? approval.payload.agentId : null;
+      if (payloadAgentId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(payloadAgentId) });
+      }
       navigate(`/approvals/${id}?resolved=approved`);
     },
     onError: (err) => {
@@ -1150,9 +1156,15 @@ export function Inbox() {
 
   const rejectMutation = useMutation({
     mutationFn: (id: string) => approvalsApi.reject(id),
-    onSuccess: () => {
+    onSuccess: (approval) => {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(selectedCompanyId!) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+      const payloadAgentId =
+        typeof approval.payload?.agentId === "string" ? approval.payload.agentId : null;
+      if (payloadAgentId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(payloadAgentId) });
+      }
     },
     onError: (err) => {
       setActionError(err instanceof Error ? err.message : "Failed to reject");
@@ -1162,11 +1174,14 @@ export function Inbox() {
   const approveJoinMutation = useMutation({
     mutationFn: (joinRequest: JoinRequest) =>
       accessApi.approveJoinRequest(selectedCompanyId!, joinRequest.id),
-    onSuccess: () => {
+    onSuccess: (joinRequest) => {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.access.joinRequests(selectedCompanyId!) });
       queryClient.invalidateQueries({ queryKey: queryKeys.sidebarBadges(selectedCompanyId!) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+      if (joinRequest.createdAgentId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(joinRequest.createdAgentId) });
+      }
       queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
     },
     onError: (err) => {

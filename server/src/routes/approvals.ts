@@ -131,6 +131,10 @@ export function approvalRoutes(db: Db) {
       const linkedIssues = await issueApprovalsSvc.listIssuesForApproval(approval.id);
       const linkedIssueIds = linkedIssues.map((issue) => issue.id);
       const primaryIssueId = linkedIssueIds[0] ?? null;
+      const payloadAgentId =
+        approval.type === "hire_agent" && typeof approval.payload?.agentId === "string"
+          ? approval.payload.agentId
+          : null;
 
       await logActivity(db, {
         companyId: approval.companyId,
@@ -142,6 +146,7 @@ export function approvalRoutes(db: Db) {
         details: {
           type: approval.type,
           requestedByAgentId: approval.requestedByAgentId,
+          payloadAgentId,
           linkedIssueIds,
         },
       });
@@ -223,6 +228,10 @@ export function approvalRoutes(db: Db) {
     );
 
     if (applied) {
+      const payloadAgentId =
+        approval.type === "hire_agent" && typeof approval.payload?.agentId === "string"
+          ? approval.payload.agentId
+          : null;
       await logActivity(db, {
         companyId: approval.companyId,
         actorType: "user",
@@ -230,7 +239,7 @@ export function approvalRoutes(db: Db) {
         action: "approval.rejected",
         entityType: "approval",
         entityId: approval.id,
-        details: { type: approval.type },
+        details: { type: approval.type, payloadAgentId },
       });
     }
 

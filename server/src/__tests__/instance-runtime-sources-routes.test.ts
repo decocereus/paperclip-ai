@@ -273,6 +273,40 @@ describe("instance runtime sources routes", () => {
     });
   });
 
+  it("returns the local openclaw gateway token for instance-admin capable board users", async () => {
+    mockReadConfigFile.mockReturnValue({
+      $meta: {
+        version: 1,
+        updatedAt: "2026-04-06T00:00:00.000Z",
+        source: "configure",
+      },
+      runtimeSources: {
+        openclaw: {
+          enabled: true,
+          mode: "linked",
+          homeDir: "/Users/test/.openclaw",
+        },
+      },
+    });
+    const spy = vi
+      .spyOn(instanceRuntimeSourcesRouteInternals, "readOpenClawGatewayToken")
+      .mockReturnValue("gateway-token-1234567890");
+
+    const app = createApp({
+      type: "board",
+      userId: "local-board",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+
+    const res = await request(app).get("/api/instance/runtime-sources/openclaw/gateway-token");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ token: "gateway-token-1234567890" });
+    expect(spy).toHaveBeenCalledWith("/Users/test/.openclaw");
+    spy.mockRestore();
+  });
+
   it("requires instance admin capable board access to update runtime sources", async () => {
     const app = createApp({
       type: "board",

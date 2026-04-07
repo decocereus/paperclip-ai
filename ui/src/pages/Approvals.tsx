@@ -43,9 +43,15 @@ export function Approvals() {
 
   const approveMutation = useMutation({
     mutationFn: (id: string) => approvalsApi.approve(id),
-    onSuccess: (_approval, id) => {
+    onSuccess: (approval, id) => {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(selectedCompanyId!) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+      const payloadAgentId =
+        typeof approval.payload?.agentId === "string" ? approval.payload.agentId : null;
+      if (payloadAgentId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(payloadAgentId) });
+      }
       navigate(`/approvals/${id}?resolved=approved`);
     },
     onError: (err) => {
@@ -55,9 +61,15 @@ export function Approvals() {
 
   const rejectMutation = useMutation({
     mutationFn: (id: string) => approvalsApi.reject(id),
-    onSuccess: () => {
+    onSuccess: (approval) => {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(selectedCompanyId!) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(selectedCompanyId!) });
+      const payloadAgentId =
+        typeof approval.payload?.agentId === "string" ? approval.payload.agentId : null;
+      if (payloadAgentId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(payloadAgentId) });
+      }
     },
     onError: (err) => {
       setActionError(err instanceof Error ? err.message : "Failed to reject");

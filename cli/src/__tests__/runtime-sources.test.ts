@@ -1,15 +1,20 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildLinkedRuntimeSourcesConfig,
   detectRuntimeSources,
 } from "@paperclipai/shared/runtime-sources";
+import { showOpenClawGatewayTokenCommand } from "../commands/runtime-sources.js";
 
 function makeTempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-runtime-sources-"));
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("runtime source discovery", () => {
   it("detects paperclip, codex, and openclaw homes with inventory hints", () => {
@@ -125,5 +130,36 @@ describe("runtime source discovery", () => {
       mode: "linked",
       homeDir: "/tmp/openclaw-home",
     });
+  });
+
+  it("prints the OpenClaw gateway token from the linked runtime home", async () => {
+    const root = makeTempRoot();
+    const openclawHome = path.join(root, "openclaw-home");
+    fs.mkdirSync(openclawHome, { recursive: true });
+    fs.writeFileSync(
+      path.join(openclawHome, "openclaw.json"),
+      JSON.stringify({
+        gateway: {
+          auth: {
+            token: "gateway-token-1234567890",
+          },
+        },
+      }),
+    );
+
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const previousOpenClawHome = process.env.OPENCLAW_HOME;
+    process.env.OPENCLAW_HOME = openclawHome;
+
+    try {
+      await showOpenClawGatewayTokenCommand({ shell: true });
+    } finally {
+      if (previousOpenClawHome === undefined) delete process.env.OPENCLAW_HOME;
+      else process.env.OPENCLAW_HOME = previousOpenClawHome;
+    }
+
+    expect(log).toHaveBeenCalledWith(
+      "export OPENCLAW_GATEWAY_TOKEN='gateway-token-1234567890'",
+    );
   });
 });

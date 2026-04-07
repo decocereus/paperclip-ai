@@ -29,6 +29,49 @@ These decisions should hold across all phases unless we discover a hard blocker.
 - **CLI-first onboarding is acceptable**: A CLI flow can arrive before the UI wizard, as long as the UI eventually exposes the same capabilities.
 - **Memory is provider-linked first**: OpenClaw memory should initially appear in Paperclip as a linked memory provider/store, not as copied rows inside Paperclip Postgres.
 
+## Progress Update (2026-04-07)
+
+This is the current implementation snapshot after the first major build-out.
+
+### Landed
+
+- Linked runtime-source config now exists and is persisted through Paperclip host-local config.
+- Paperclip can discover and link existing `~/.paperclip`, `~/.codex`, and `~/.openclaw` homes.
+- CLI support exists for runtime-source detection, inspection, linking, onboarding, and doctor checks.
+- Runtime Sources now has server APIs and a working web settings page.
+- Existing Codex threads, Codex skills/plugins, OpenClaw sessions, and OpenClaw skills can be indexed and shown in Paperclip.
+- Issues can now link to external Codex threads or OpenClaw sessions.
+- Paperclip now exposes issue conversation read, send, steer, interrupt, and approval-resolution APIs for linked conversations.
+- Linked Codex conversations can use a live `codex app-server` manager for interactive supervision.
+- Linked Codex approvals are brokered into the Paperclip approval model.
+- OpenClaw linked sessions now participate in session reuse through task-session state.
+- Shared Codex-home mode is wired into `codex_local`, so linked sessions can continue against the canonical shared Codex home.
+- Issue creation can now attach a repo, load repo-related Codex threads, and either continue one or start a new shared Codex thread.
+- Onboarding now supports an optional local repo attachment for the initial project/issue path.
+- Repo attachment now persists through issue runtime-link metadata and survives reloads/server restarts.
+- The issue detail external-conversation UI has been tightened and made more repo-aware.
+
+### Partially Landed
+
+- OpenClaw has linked preview and session reuse, but it does not yet have full live-manager parity with the Codex interactive path.
+- Repo attachment is now a first-class issue/onboarding flow, but there is still room to make project/workspace selection more elegant and more obvious in the UX.
+- Codex live supervision works in the current server process, but some transient live state is still more restart-sensitive than ideal.
+
+### Not Done Yet
+
+- Full durable restart-safe persistence for every live Codex approval/session-control edge case.
+- True OpenClaw live conversation manager parity with send/stream/interrupt handling comparable to Codex.
+- Mobile supervision client on top of the shared conversation API.
+- Final polish pass on onboarding and issue creation UX for repo attachment and linked-runtime terminology.
+
+### Recommended Next Steps
+
+1. Finish OpenClaw live-manager parity so linked OpenClaw sessions support the same operator-level supervision model as Codex where the runtime allows it.
+2. Harden Codex live runtime durability so approval/session state survives server restarts more cleanly.
+3. Add focused end-to-end tests for the new repo-attached issue creation path and shared-thread continuity.
+4. Polish onboarding and issue creation UX copy so repo attachment and linked/shared behavior are more self-explanatory.
+5. Build the first mobile supervision surface on top of the existing Paperclip conversation APIs.
+
 ## Phase 0: Local State Discovery
 
 **User stories**:

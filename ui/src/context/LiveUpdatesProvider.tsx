@@ -535,11 +535,26 @@ function invalidateActivityQueries(
 
   if (entityType === "approval") {
     queryClient.invalidateQueries({ queryKey: queryKeys.approvals.list(companyId) });
+    const details = readRecord(payload.details);
+    const affectedAgentId =
+      readString(details?.payloadAgentId) ??
+      readString(details?.createdAgentId) ??
+      readString(details?.agentId);
+    if (affectedAgentId) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(companyId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(affectedAgentId) });
+    }
     return;
   }
 
   if (entityType === "join_request") {
     queryClient.invalidateQueries({ queryKey: queryKeys.access.joinRequests(companyId) });
+    const details = readRecord(payload.details);
+    const createdAgentId = readString(details?.createdAgentId);
+    if (createdAgentId) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(companyId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(createdAgentId) });
+    }
     return;
   }
 

@@ -81,6 +81,11 @@ export function ApprovalDetail() {
         queryKey: queryKeys.approvals.list(approval.companyId, "pending"),
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.list(approval.companyId) });
+      const payloadAgentId =
+        typeof approval.payload?.agentId === "string" ? approval.payload.agentId : null;
+      if (payloadAgentId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(payloadAgentId) });
+      }
     }
   };
 

@@ -31,4 +31,6 @@ export const runtimeSourcesApi = {
     api.get<{ data: OpenClawSessionSummary[] }>(`/instance/runtime-sources/openclaw/sessions?limit=${encodeURIComponent(String(limit))}`),
   openclawSkills: (limit = 50) =>
     api.get<{ data: RuntimeNamedEntry[] }>(`/instance/runtime-sources/openclaw/skills?limit=${encodeURIComponent(String(limit))}`),
+  openclawGatewayToken: () =>
+    api.get<{ token: string | null }>("/instance/runtime-sources/openclaw/gateway-token"),
 };

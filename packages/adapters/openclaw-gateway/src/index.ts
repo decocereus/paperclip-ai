@@ -1,5 +1,6 @@
 export const type = "openclaw_gateway";
 export const label = "OpenClaw Gateway";
+export const DEFAULT_OPENCLAW_GATEWAY_URL = "ws://127.0.0.1:18789";
 
 export const models: { id: string; label: string }[] = [];
 
@@ -16,7 +17,7 @@ Don't use when:
 - Your deployment does not permit outbound WebSocket access from the Paperclip server.
 
 Core fields:
-- url (string, required): OpenClaw gateway WebSocket URL (ws:// or wss://)
+- url (string, required): OpenClaw gateway WebSocket URL (ws:// or wss://). Local default: ${DEFAULT_OPENCLAW_GATEWAY_URL}
 - headers (object, optional): handshake headers; supports x-openclaw-token / x-openclaw-auth
 - authToken (string, optional): shared gateway token override
 - password (string, optional): gateway shared password, if configured

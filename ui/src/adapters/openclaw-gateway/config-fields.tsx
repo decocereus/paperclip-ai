@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import { DEFAULT_OPENCLAW_GATEWAY_URL } from "@paperclipai/adapter-openclaw-gateway";
 import type { AdapterConfigFieldsProps } from "../types";
 import {
   Field,
@@ -112,7 +113,7 @@ export function OpenClawGatewayConfigFields({
           }
           immediate
           className={inputClass}
-          placeholder="ws://127.0.0.1:18789"
+          placeholder={DEFAULT_OPENCLAW_GATEWAY_URL}
         />
       </Field>
 

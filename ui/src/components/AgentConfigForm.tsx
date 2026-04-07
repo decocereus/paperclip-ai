@@ -10,12 +10,14 @@ import type { AdapterModel } from "../api/agents";
 import { agentsApi } from "../api/agents";
 import { secretsApi } from "../api/secrets";
 import { assetsApi } from "../api/assets";
+import { runtimeSourcesApi } from "../api/runtimeSources";
 import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
+import { DEFAULT_OPENCLAW_GATEWAY_URL } from "@paperclipai/adapter-openclaw-gateway";
 import {
   Popover,
   PopoverContent,
@@ -334,6 +336,12 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     queryFn: () => agentsApi.adapterModels(selectedCompanyId!, adapterType),
     enabled: Boolean(selectedCompanyId),
   });
+  const { data: openClawGatewayToken } = useQuery({
+    queryKey: queryKeys.instance.runtimeSourcesOpenClawGatewayToken,
+    queryFn: () => runtimeSourcesApi.openclawGatewayToken(),
+    enabled: Boolean(isCreate && adapterType === "openclaw_gateway"),
+    retry: false,
+  });
   const models = fetchedModels ?? externalModels ?? [];
   const {
     data: detectedModelData,
@@ -384,6 +392,17 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const set = isCreate
     ? (patch: Partial<CreateConfigValues>) => props.onChange(patch)
     : null;
+
+  useEffect(() => {
+    if (!isCreate || adapterType !== "openclaw_gateway" || !set) return;
+    const token = openClawGatewayToken?.token?.trim() ?? "";
+    if (!token) return;
+    if ((val?.openclawGatewayToken ?? "").trim().length > 0) return;
+    set({
+      openclawGatewayToken: token,
+      ...(val?.url?.trim() ? {} : { url: DEFAULT_OPENCLAW_GATEWAY_URL }),
+    });
+  }, [adapterType, isCreate, openClawGatewayToken?.token, set, val?.openclawGatewayToken, val?.url]);
 
   function buildAdapterConfigForTest(): Record<string, unknown> {
     if (isCreate) {
@@ -599,6 +618,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                       nextValues.model = DEFAULT_CURSOR_LOCAL_MODEL;
                     } else if (t === "opencode_local") {
                       nextValues.model = "";
+                    } else if (t === "openclaw_gateway") {
+                      nextValues.url = DEFAULT_OPENCLAW_GATEWAY_URL;
                     }
                     set!(nextValues);
                   } else {
@@ -615,6 +636,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                               ? DEFAULT_GEMINI_LOCAL_MODEL
                             : t === "cursor"
                               ? DEFAULT_CURSOR_LOCAL_MODEL
+                            : t === "openclaw_gateway"
+                              ? DEFAULT_OPENCLAW_GATEWAY_URL
                             : "",
                         effort: "",
                         modelReasoningEffort: "",

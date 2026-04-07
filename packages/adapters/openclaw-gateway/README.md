@@ -55,6 +55,8 @@ The agent request is built as:
   - all `payloadTemplate` fields merged in
   - `agentId` from config if set and not already in template
 
+Paperclip runtime context is embedded into the wake `message`; the adapter does not send a top-level `paperclip` field in the gateway `agent` request.
+
 ## Timeouts
 
 - `timeoutSec` controls adapter-level request budget

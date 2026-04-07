@@ -29,6 +29,7 @@ import {
 } from "@paperclipai/adapter-codex-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
+import { DEFAULT_OPENCLAW_GATEWAY_URL } from "@paperclipai/adapter-openclaw-gateway";
 
 function createValuesForAdapterType(
   adapterType: CreateConfigValues["adapterType"],
@@ -45,6 +46,8 @@ function createValuesForAdapterType(
     nextValues.model = DEFAULT_CURSOR_LOCAL_MODEL;
   } else if (adapterType === "opencode_local") {
     nextValues.model = "";
+  } else if (adapterType === "openclaw_gateway") {
+    nextValues.url = DEFAULT_OPENCLAW_GATEWAY_URL;
   }
   return nextValues;
 }

@@ -106,6 +106,7 @@ export const queryKeys = {
     runtimeSourcesCodexPlugins: ["instance", "runtime-sources-codex-plugins"] as const,
     runtimeSourcesOpenClawSessions: ["instance", "runtime-sources-openclaw-sessions"] as const,
     runtimeSourcesOpenClawSkills: ["instance", "runtime-sources-openclaw-skills"] as const,
+    runtimeSourcesOpenClawGatewayToken: ["instance", "runtime-sources-openclaw-gateway-token"] as const,
   },
   health: ["health"] as const,
   secrets: {
