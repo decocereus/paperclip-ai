@@ -18,21 +18,39 @@ Paperclip is in a strong `v0` place on web:
 - issue-linked external conversations are working
 - Codex live supervision is working
 - OpenClaw gateway support is now viable for real usage
+- direct agent chat is working
+- the board meeting room is working with relays and mirrored replies
+- issue creator provenance and issue-reuse guardrails are now in place
 
 The next major move is not “more random features.”
 It is finishing the product base, shipping mobile supervision, and then expanding into chat, docs, knowledge, and manager-agent workflows in a disciplined order.
 
+## Recently Shipped
+
+### 2026-04-09
+Status: `completed`
+
+**In-App Agent and Board Conversation Layer**
+
+- issue chat for linked runtime sessions
+- direct per-agent chat
+- shared board meeting room
+- relay execution through Paperclip instead of raw transcript leakage
+- coordination events and concise board-facing replies
+- issue creation provenance and duplicate-reuse guardrails
+
 ## Near-Term Timeline
 
-### 2026-04-10
+### 2026-04-12
 Status: `in_progress`
 
-**Linked Runtime Hardening**
+**Generalized Linked Runtime Supervision**
 
-- finish Codex and OpenClaw live-session recovery
-- harden restart behavior
-- close the major onboarding and approval-sync papercuts
-- add focused end-to-end reliability coverage
+- finish Codex and OpenClaw hardening and restart behavior
+- keep closing onboarding/auth/approval-sync papercuts
+- define one reusable linked-runtime supervision architecture that other adapters can implement
+- extend session discovery / snapshot / send / steer / interrupt semantics beyond only Codex and OpenClaw where possible
+- avoid hardcoding future runtime UX per provider
 
 ### 2026-04-18
 Status: `planned`
@@ -45,16 +63,6 @@ Status: `planned`
 - send / steer / interrupt from mobile
 - no mobile-side runtime protocol logic
 
-### 2026-04-28
-Status: `planned`
-
-**In-App Agent Chat**
-
-- direct chat surface for agents inside Paperclip
-- avoid forcing every workflow into issue comments
-- support issue-linked chat and direct exploratory chat
-- allow promoting a conversation into tracked work
-
 ### 2026-05-05
 Status: `planned`
 
@@ -63,6 +71,15 @@ Status: `planned`
 - agents should produce docs and deliverables, not just transcripts
 - Paperclip-native docs should become the first-class output model
 - research, plans, briefs, and decision memos should be durable objects
+
+### 2026-05-12
+Status: `planned`
+
+**Issue-Run Coordination Visibility**
+
+- bring the same quality of coordination visibility from the board meeting into issue execution surfaces
+- show agent-to-agent asks, status, and responses without turning issue detail into a debug console
+- make asynchronous completions and follow-backs feel native
 
 ### 2026-05-20
 Status: `idea`

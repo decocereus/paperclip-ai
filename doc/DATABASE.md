@@ -131,6 +131,25 @@ The database mode is controlled by `DATABASE_URL`:
 
 Your Drizzle schema (`packages/db/src/schema/`) stays the same regardless of mode.
 
+## Current Schema Notes
+
+Recent product work added a few important fields that matter when reasoning about the current system:
+
+- `companies.url_slug`
+  - stable human-facing route key for company-scoped UI URLs
+  - the web app should prefer this over using only `issue_prefix` in paths
+
+- `issues.creation_context`
+  - JSON provenance for why/how an issue was created
+  - used for agent-created work so the issue detail view can explain the originating request instead of forcing users to reconstruct it from chat history
+
+- `issues.identifier`, `issues.origin_kind`, `issues.origin_id`, `issues.origin_run_id`
+  - these are now central to issue provenance, routine execution tracing, and operator-visible issue identity
+
+- `issue_runtime_links`
+  - this is the persistence layer for linking a Paperclip issue to a canonical external runtime conversation
+  - issue chat and linked runtime supervision depend on it
+
 ## Secret storage
 
 Paperclip stores secret metadata and versions in:

@@ -39,6 +39,42 @@ There are two fundamental modes for running an agent's heartbeat:
 
 We provide sensible defaults — a default agent that shells out to Claude Code or Codex with your configuration, remembers session IDs, runs basic scripts. But you can plug in anything.
 
+### Communication Surfaces
+
+Paperclip is no longer only a “task comments” product in the narrow UI sense.
+It now has four operator-facing communication surfaces:
+
+1. **Issue comments** — durable, formal work updates attached to tracked tasks
+2. **Issue chat** — the live conversation surface for a linked runtime session on a specific issue
+3. **Direct agent chat** — persistent per-agent conversations for status, coordination, and work kickoff outside a single issue
+4. **Board meeting chat** — a shared room where the board can address agents and issues, and Paperclip can relay inter-agent coordination back into one canonical thread
+
+The important product rule is unchanged:
+conversation should stay attached to work, governance, and outputs.
+Paperclip should not drift into being a generic social chat app with no control-plane semantics.
+
+### Linked Runtime Supervision
+
+Paperclip now has a meaningful distinction between:
+
+- **adapter execution** — how an agent actually runs its heartbeat
+- **linked runtime supervision** — how Paperclip discovers, links, reads, and steers a canonical external session
+
+Today, linked runtime supervision is strongest for **Codex** and **OpenClaw**:
+
+- runtime-source discovery can find their local homes and session state
+- issues can link to canonical external conversations
+- Paperclip can render snapshots, send follow-ups, steer active turns, and interrupt where supported
+- the same linked conversation model now powers issue chat, direct agent chat, and the board meeting relay flow
+
+The architectural direction from here should be:
+
+- keep one shared “live conversation capability” shape in the control plane
+- let adapters opt into that capability when they can expose stable session semantics
+- avoid hardcoding every future chat/runtime feature directly to only Codex or OpenClaw
+
+That is how we eventually support Claude, Cursor, OpenCode, Pi, and external adapters with the same supervision model when they can provide canonical sessions.
+
 ### Task Management
 
 Task management is hierarchical. At any moment, every piece of work must trace back to the company's top-level goal through a chain of parent tasks:
@@ -97,7 +133,7 @@ See [SPEC.md](./SPEC.md) for the full technical specification and [TASKS.md](./T
 
 ---
 
-Paperclip’s core identity is a **control plane for autonomous AI companies**, centered on **companies, org charts, goals, issues/comments, heartbeats, budgets, approvals, and board governance**. The public docs are also explicit about the current boundaries: **tasks/comments are the built-in communication model**, Paperclip is **not a chatbot**, and it is **not a code review tool**. The roadmap already points toward **easier onboarding, cloud agents, easier agent configuration, plugins, better docs, and ClipMart/ClipHub-style reusable companies/templates**. The current near-term roadmap now lives in [ROADMAP.md](./ROADMAP.md) and is also visible in-app at `/instance/settings/roadmap`.
+Paperclip’s core identity is a **control plane for autonomous AI companies**, centered on **companies, org charts, goals, issues, live conversations, heartbeats, budgets, approvals, and board governance**. The important boundary is no longer “no chat exists”; it is that **chat must remain work-attached and governance-aware**. Paperclip still should not become a generic consumer chatbot or a code-review product. The roadmap already points toward **mobile supervision, artifact-first outputs, generalized runtime supervision, better docs, and reusable companies/templates**. The current near-term roadmap now lives in [ROADMAP.md](./ROADMAP.md) and is also visible in-app at `/instance/settings/roadmap`.
 
 ## What Paperclip should do vs. not do
 
@@ -105,19 +141,21 @@ Paperclip’s core identity is a **control plane for autonomous AI companies**, 
 
 - Stay **board-level and company-level**. Users should manage goals, orgs, budgets, approvals, and outputs.
 - Make the first five minutes feel magical: install, answer a few questions, see a CEO do something real.
-- Keep work anchored to **issues/comments/projects/goals**, even if the surface feels conversational.
+- Keep work anchored to **issues/chats/projects/goals**, even if the surface feels conversational.
 - Treat **agency / internal team / startup** as the same underlying abstraction with different templates and labels.
 - Make outputs first-class: files, docs, reports, previews, links, screenshots.
 - Provide **hooks into engineering workflows**: worktrees, preview servers, PR links, external review tools.
 - Use **plugins** for edge cases like rich chat, knowledge bases, doc editors, custom tracing.
+- Treat linked runtime supervision as a reusable product capability, not a one-off per-provider hack.
 
 **Do not**
 
-- Do not make the core product a general chat app. The current product definition is explicitly task/comment-centric and “not a chatbot,” and that boundary is valuable.
+- Do not make the core product a general chat app. Chat surfaces are now real and useful, but they must stay attached to work objects, decisions, approvals, and outputs.
 - Do not build a complete Jira/GitHub replacement. The repo/docs already position Paperclip as organization orchestration, not focused on pull-request review.
 - Do not build enterprise-grade RBAC first. The current V1 spec still treats multi-board governance and fine-grained human permissions as out of scope, so the first multi-user version should be coarse and company-scoped.
 - Do not lead with raw bash logs and transcripts. Default view should be human-readable intent/progress, with raw detail beneath.
 - Do not force users to understand provider/API-key plumbing unless absolutely necessary. There are active onboarding/auth issues already; friction here is clearly real.
+- Do not keep adding provider-specific runtime UX forever. New linked-runtime support should plug into one shared supervision architecture.
 
 ## Specific design goals
 

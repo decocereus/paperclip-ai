@@ -1,9 +1,9 @@
 # Paperclip V1 Implementation Spec
 
 Status: Implementation contract for first release (V1)
-Date: 2026-02-17
+Date: 2026-04-09
 Audience: Product, engineering, and agent-integration authors
-Source inputs: `GOAL.md`, `PRODUCT.md`, `SPEC.md`, `DATABASE.md`, current monorepo code
+Source inputs: `PRODUCT.md`, `SPEC.md`, `DATABASE.md`, current monorepo code
 
 ## 1. Document Role
 
@@ -35,10 +35,10 @@ These decisions close open questions from `SPEC.md` for V1.
 | Board | Single human board operator per deployment |
 | Org graph | Strict tree (`reports_to` nullable root); no multi-manager reporting |
 | Visibility | Full visibility to board and all agents in same company |
-| Communication | Tasks + comments only (no separate chat system) |
+| Communication | Work-attached conversation surfaces are allowed: issue comments, issue chat, direct agent chat, and board meeting chat |
 | Task ownership | Single assignee; atomic checkout required for `in_progress` transition |
 | Recovery | No automatic reassignment; work recovery stays manual/explicit |
-| Agent adapters | Built-in `process` and `http` adapters |
+| Agent adapters | Built-ins include `process`, `http`, `claude_local`, `codex_local`, `gemini_local`, `opencode_local`, `pi_local`, `cursor`, and `openclaw_gateway`; external adapters remain allowed |
 | Auth | Mode-dependent human auth (`local_trusted` implicit board in current code; authenticated mode uses sessions), API keys for agents |
 | Budget period | Monthly UTC calendar window |
 | Budget enforcement | Soft alerts + hard limit auto-pause |
@@ -52,6 +52,15 @@ As of 2026-02-17, the repo already includes:
 - React UI pages for dashboard/agents/projects/goals/issues lists
 - PostgreSQL schema via Drizzle with embedded PostgreSQL fallback when `DATABASE_URL` is unset
 
+The current implementation now also includes:
+
+- linked runtime-source discovery for Codex and OpenClaw
+- issue-linked external conversations
+- issue chat UI for linked runtime sessions
+- direct per-agent chat
+- a board meeting room that can relay between agents
+- issue creation provenance and basic duplicate-reuse guardrails for agent-created issues
+
 V1 implementation extends this baseline into a company-centric, governance-aware control plane.
 
 ## 5. V1 Scope
@@ -62,13 +71,18 @@ V1 implementation extends this baseline into a company-centric, governance-aware
 - Goal hierarchy linked to company mission
 - Agent lifecycle with org structure and adapter configuration
 - Task lifecycle with parent/child hierarchy and comments
+- Issue-linked runtime conversations for supported runtimes
+- Direct agent chat for responsibilities, coordination, and work kickoff
+- Board meeting chat as a shared operator room over the same control-plane APIs
 - Atomic task checkout and explicit task status transitions
 - Board approvals for hires and CEO strategy proposal
 - Heartbeat invocation, status tracking, and cancellation
 - Cost event ingestion and rollups (agent/task/project/company)
 - Budget settings and hard-stop enforcement
 - Board web UI for dashboard, org chart, tasks, agents, approvals, costs
+- Runtime-source discovery and issue runtime-link management for supported runtimes
 - Agent-facing API contract (task read/write, heartbeat report, cost report)
+- Provenance on agent-created issues (`createdBy*`, `creationContext`)
 - Auditable activity log for all mutating actions
 
 ## 5.2 Out of Scope (V1)
@@ -122,6 +136,7 @@ Human auth tables (`users`, `sessions`, and provider-specific auth artifacts) ar
 - `id` uuid pk
 - `name` text not null
 - `description` text null
+- `url_slug` text not null unique
 - `status` enum: `active | paused | archived`
 
 Invariant: every business record belongs to exactly one company.
@@ -133,10 +148,10 @@ Invariant: every business record belongs to exactly one company.
 - `name` text not null
 - `role` text not null
 - `title` text null
-- `status` enum: `active | paused | idle | running | error | terminated`
+- `status` enum: `active | paused | idle | running | error | pending_approval | terminated`
 - `reports_to` uuid fk `agents.id` null
 - `capabilities` text null
-- `adapter_type` enum: `process | http`
+- `adapter_type` text not null (built-ins currently include `process`, `http`, `claude_local`, `codex_local`, `gemini_local`, `opencode_local`, `pi_local`, `cursor`, `openclaw_gateway`)
 - `adapter_config` jsonb not null
 - `context_mode` enum: `thin | fat` default `thin`
 - `budget_monthly_cents` int not null default 0
@@ -199,11 +214,20 @@ Invariant: at least one root `company` level goal per company.
 - `assignee_agent_id` uuid fk `agents.id` null
 - `created_by_agent_id` uuid fk `agents.id` null
 - `created_by_user_id` uuid fk `users.id` null
+- `issue_number` int null
+- `identifier` text null
+- `origin_kind` text not null default `manual`
+- `origin_id` text null
+- `origin_run_id` text null
+- `creation_context` jsonb null
 - `request_depth` int not null default 0
 - `billing_code` text null
+- `checkout_run_id` uuid fk `heartbeat_runs.id` null
+- `execution_run_id` uuid fk `heartbeat_runs.id` null
 - `started_at` timestamptz null
 - `completed_at` timestamptz null
 - `cancelled_at` timestamptz null
+- `hidden_at` timestamptz null
 
 Invariants:
 
@@ -211,6 +235,22 @@ Invariants:
 - task must trace to company goal chain via `goal_id`, `parent_id`, or project-goal linkage
 - `in_progress` requires assignee
 - terminal states: `done | cancelled`
+
+### 7.6.1 `issue_runtime_links`
+
+- `issue_id` uuid fk `issues.id` pk
+- `company_id` uuid fk `companies.id` not null
+- `runtime_kind` enum/text (`codex | openclaw`) not null
+- `external_conversation_id` text not null
+- `external_conversation_label` text null
+- `metadata_json` jsonb null
+- `linked_by_agent_id` uuid fk `agents.id` null
+- `linked_by_user_id` uuid fk `users.id` null
+
+Purpose:
+
+- persist canonical links from an issue to an external runtime conversation
+- allow issue chat and linked supervision to remain stable across browser refreshes and server restarts
 
 ## 7.7 `issue_comments`
 
@@ -464,6 +504,14 @@ All endpoints are under `/api` and return JSON.
 - `POST /agents/:agentId/keys` (create API key)
 - `POST /agents/:agentId/heartbeat/invoke`
 
+### 10.3.1 Agent Conversation Endpoints
+
+- `GET /agents/:agentId/conversation`
+- `POST /agents/:agentId/conversation/send`
+- `POST /agents/:agentId/conversation/steer`
+- `POST /agents/:agentId/conversation/interrupt`
+- `POST /agents/:agentId/conversation/approvals/:requestId/resolve`
+
 ## 10.4 Tasks (Issues)
 
 - `GET /companies/:companyId/issues`
@@ -501,6 +549,20 @@ Server behavior:
 2. if updated row count is 0, return `409` with current owner/status
 3. successful checkout sets `assignee_agent_id`, `status = in_progress`, and `started_at`
 
+### 10.4.2 Issue Conversation Endpoints
+
+- `GET /issues/:issueId/conversation`
+- `POST /issues/:issueId/conversation/send`
+- `POST /issues/:issueId/conversation/steer`
+- `POST /issues/:issueId/conversation/interrupt`
+- `POST /issues/:issueId/conversation/approvals/:requestId/resolve`
+
+### 10.4.3 Issue Runtime Link Endpoints
+
+- `GET /issues/:issueId/runtime-link`
+- `PUT /issues/:issueId/runtime-link`
+- `DELETE /issues/:issueId/runtime-link`
+
 ## 10.5 Projects
 
 - `GET /companies/:companyId/projects`
@@ -524,7 +586,23 @@ Server behavior:
 - `PATCH /companies/:companyId/budgets`
 - `PATCH /agents/:agentId/budgets`
 
-## 10.8 Activity and Dashboard
+## 10.8 Instance Operations
+
+- `GET /instance/runtime-sources`
+- `GET /instance/runtime-sources/discovery`
+- `PATCH /instance/runtime-sources`
+- `GET /instance/runtime-sources/codex/threads`
+- `GET /instance/runtime-sources/codex/skills`
+- `GET /instance/runtime-sources/codex/plugins`
+- `GET /instance/runtime-sources/openclaw/sessions`
+- `GET /instance/runtime-sources/openclaw/skills`
+- `GET /instance/runtime-sources/openclaw/gateway-token`
+- `GET /instance/roadmap`
+- `POST /instance/roadmap`
+- `PATCH /instance/roadmap/:id`
+- `DELETE /instance/roadmap/:id`
+
+## 10.9 Activity and Dashboard
 
 - `GET /companies/:companyId/activity`
 - `GET /companies/:companyId/dashboard`
@@ -536,7 +614,7 @@ Dashboard payload must include:
 - month-to-date spend and budget utilization
 - pending approvals count
 
-## 10.9 Error Semantics
+## 10.10 Error Semantics
 
 - `400` validation error
 - `401` unauthenticated
@@ -548,15 +626,25 @@ Dashboard payload must include:
 
 ## 11. Heartbeat and Adapter Contract
 
-## 11.1 Adapter Interface
+## 11.1 Adapter Host Contract
 
 ```ts
-interface AgentAdapter {
-  invoke(agent: Agent, context: InvocationContext): Promise<InvokeResult>;
-  status(run: HeartbeatRun): Promise<RunStatus>;
-  cancel(run: HeartbeatRun): Promise<void>;
+interface ServerAdapterModule {
+  type: string;
+  execute(input: ExecuteInput): Promise<ExecuteResult>;
+  testEnvironment?(input: TestEnvironmentInput): Promise<TestEnvironmentResult>;
+  sessionCodec?: AdapterSessionCodec;
+  sessionManagement?: AdapterSessionManagement;
+  listModels?(): Promise<ModelListResult>;
+  detectModel?(): Promise<DetectedModel | null>;
 }
 ```
+
+Notes:
+
+- `process` and `http` remain generic built-in execution adapters
+- local adapters such as `claude_local`, `codex_local`, `cursor`, `gemini_local`, `opencode_local`, `pi_local`, and `openclaw_gateway` also plug into this host contract
+- linked runtime supervision should increasingly be expressed through reusable adapter/session capabilities rather than one-off provider-specific routes
 
 ## 11.2 Process Adapter
 
@@ -872,3 +960,16 @@ Export/import behavior in V1:
 - import supports collision strategies: `rename`, `skip`, `replace`
 - import supports preview (dry-run) before apply
 - GitHub imports warn on unpinned refs instead of blocking
+- `GET /instance/runtime-sources`
+- `GET /instance/runtime-sources/discovery`
+- `PATCH /instance/runtime-sources`
+- `GET /instance/runtime-sources/codex/threads`
+- `GET /instance/runtime-sources/codex/skills`
+- `GET /instance/runtime-sources/codex/plugins`
+- `GET /instance/runtime-sources/openclaw/sessions`
+- `GET /instance/runtime-sources/openclaw/skills`
+- `GET /instance/runtime-sources/openclaw/gateway-token`
+- `GET /instance/roadmap`
+- `POST /instance/roadmap`
+- `PATCH /instance/roadmap/:id`
+- `DELETE /instance/roadmap/:id`

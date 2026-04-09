@@ -52,6 +52,17 @@ pnpm dev:stop
 
 `pnpm dev:once` now tracks backend-relevant file changes and pending migrations. When the current boot is stale, the board UI shows a `Restart required` banner. You can also enable guarded auto-restart in `Instance Settings > Experimental`, which waits for queued/running local agent runs to finish before restarting the dev server.
 
+## Useful Local URLs
+
+Once the app is running, the most useful operator surfaces are:
+
+- board dashboard: `http://localhost:3100/<company-route-key>/dashboard`
+- board meeting: `http://localhost:3100/<company-route-key>/meeting`
+- instance runtime sources: `http://localhost:3100/instance/settings/runtime-sources`
+- instance roadmap: `http://localhost:3100/instance/settings/roadmap`
+
+`<company-route-key>` is usually the company URL slug. Older prefixes still work as aliases in many places, but new UI routing should prefer the slug-shaped company route key.
+
 Tailscale/private-auth dev mode:
 
 ```sh
@@ -79,6 +90,20 @@ pnpm paperclipai run
 1. auto-onboard if config is missing
 2. `paperclipai doctor` with repair enabled
 3. starts the server when checks pass
+
+If pending migrations exist, `paperclipai run` prompts to apply them before starting the server.
+
+## Raw API Helper
+
+For debugging, development, or agent/runtime integration work, the CLI now exposes a raw API helper:
+
+```sh
+pnpm paperclipai api GET /api/health
+pnpm paperclipai api GET /api/agents/me
+pnpm paperclipai api POST /api/issues/<issue-id>/checkout --body '{"agentId":"...","expectedStatuses":["todo"]}'
+```
+
+This uses the current Paperclip auth/context configuration instead of forcing you to hand-roll headers for every request.
 
 ## Docker Quickstart (No local Node install)
 

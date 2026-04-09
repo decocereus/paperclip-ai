@@ -440,6 +440,7 @@ export function App() {
           />
           <Route path="instance/settings" element={<Layout />}>
             <Route index element={<Navigate to="general" replace />} />
+            <Route path="roadmap" element={<InstanceRoadmap />} />
             <Route path="general" element={<InstanceGeneralSettings />} />
             <Route
               path="runtime-sources"
