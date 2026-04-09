@@ -1,5 +1,6 @@
 import {
   Inbox,
+  MessageSquare,
   CircleDot,
   Target,
   LayoutDashboard,
@@ -19,6 +20,7 @@ import { SidebarProjects } from "./SidebarProjects";
 import { SidebarAgents } from "./SidebarAgents";
 import { useDialog } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
+import { companyRouteKey } from "../lib/company-routes";
 import { heartbeatsApi } from "../api/heartbeats";
 import { queryKeys } from "../lib/queryKeys";
 import { useInboxBadge } from "../hooks/useInboxBadge";
@@ -43,7 +45,7 @@ export function Sidebar() {
 
   const pluginContext = {
     companyId: selectedCompanyId,
-    companyPrefix: selectedCompany?.issuePrefix ?? null,
+    companyPrefix: selectedCompany ? companyRouteKey(selectedCompany) : null,
   };
 
   return (
@@ -80,6 +82,7 @@ export function Sidebar() {
             <span className="truncate">New Issue</span>
           </button>
           <SidebarNavItem to="/dashboard" label="Dashboard" icon={LayoutDashboard} liveCount={liveRunCount} />
+          <SidebarNavItem to="/meeting" label="Meeting" icon={MessageSquare} />
           <SidebarNavItem
             to="/inbox"
             label="Inbox"

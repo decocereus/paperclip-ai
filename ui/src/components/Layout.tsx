@@ -31,6 +31,7 @@ import {
   DEFAULT_INSTANCE_SETTINGS_PATH,
   normalizeRememberedInstanceSettingsPath,
 } from "../lib/instance-settings";
+import { companyRouteKey, matchesCompanyRouteKey } from "../lib/company-routes";
 import { queryKeys } from "../lib/queryKeys";
 import { cn } from "../lib/utils";
 import { NotFoundPage } from "../pages/NotFound";
@@ -72,8 +73,7 @@ export function Layout() {
   const nextTheme = theme === "dark" ? "light" : "dark";
   const matchedCompany = useMemo(() => {
     if (!companyPrefix) return null;
-    const requestedPrefix = companyPrefix.toUpperCase();
-    return companies.find((company) => company.issuePrefix.toUpperCase() === requestedPrefix) ?? null;
+    return companies.find((company) => matchesCompanyRouteKey(company, companyPrefix)) ?? null;
   }, [companies, companyPrefix]);
   const hasUnknownCompanyPrefix =
     Boolean(companyPrefix) && !companiesLoading && companies.length > 0 && !matchedCompany;
@@ -114,9 +114,10 @@ export function Layout() {
       return;
     }
 
-    if (companyPrefix !== matchedCompany.issuePrefix) {
+    const canonicalRouteKey = companyRouteKey(matchedCompany);
+    if (companyPrefix.toLowerCase() !== canonicalRouteKey) {
       const suffix = location.pathname.replace(/^\/[^/]+/, "");
-      navigate(`/${matchedCompany.issuePrefix}${suffix}${location.search}`, { replace: true });
+      navigate(`/${canonicalRouteKey}${suffix}${location.search}`, { replace: true });
       return;
     }
 
@@ -427,7 +428,7 @@ export function Layout() {
               {hasUnknownCompanyPrefix ? (
                 <NotFoundPage
                   scope="invalid_company_prefix"
-                  requestedPrefix={companyPrefix ?? selectedCompany?.issuePrefix}
+                  requestedPrefix={companyPrefix ?? (selectedCompany ? companyRouteKey(selectedCompany) : undefined) ?? selectedCompany?.issuePrefix}
                 />
               ) : (
                 <Outlet />

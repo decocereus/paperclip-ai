@@ -3,6 +3,7 @@ import { Menu } from "lucide-react";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useSidebar } from "../context/SidebarContext";
 import { useCompany } from "../context/CompanyContext";
+import { companyRouteKey } from "../lib/company-routes";
 import { Button } from "@/components/ui/button";
 import {
   Breadcrumb,
@@ -38,9 +39,9 @@ export function BreadcrumbBar() {
   const globalToolbarSlotContext = useMemo(
     () => ({
       companyId: selectedCompanyId ?? null,
-      companyPrefix: selectedCompany?.issuePrefix ?? null,
+      companyPrefix: selectedCompany ? companyRouteKey(selectedCompany) : null,
     }),
-    [selectedCompanyId, selectedCompany?.issuePrefix],
+    [selectedCompanyId, selectedCompany],
   );
 
   const globalToolbarSlots = <GlobalToolbarPlugins context={globalToolbarSlotContext} />;

@@ -15,5 +15,6 @@ export { dashboardApi } from "./dashboard";
 export { heartbeatsApi } from "./heartbeats";
 export { instanceSettingsApi } from "./instanceSettings";
 export { runtimeSourcesApi } from "./runtimeSources";
+export { roadmapApi } from "./roadmap";
 export { sidebarBadgesApi } from "./sidebarBadges";
 export { companySkillsApi } from "./companySkills";

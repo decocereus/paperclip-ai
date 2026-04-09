@@ -204,6 +204,20 @@ export {
 } from "./approval.js";
 
 export {
+  roadmapItemStatusSchema,
+  roadmapItemLaneSchema,
+  roadmapItemSourceSchema,
+  roadmapItemSchema,
+  createRoadmapItemSchema,
+  updateRoadmapItemSchema,
+  type RoadmapItemStatus,
+  type RoadmapItemLane,
+  type RoadmapItemSource,
+  type CreateRoadmapItem,
+  type UpdateRoadmapItem,
+} from "./roadmap.js";
+
+export {
   envBindingPlainSchema,
   envBindingSecretRefSchema,
   envBindingSchema,

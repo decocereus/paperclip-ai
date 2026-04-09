@@ -17,6 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useCompany } from "../context/CompanyContext";
+import { companyRouteKey } from "../lib/company-routes";
 import { useDialog } from "../context/DialogContext";
 import { cn } from "../lib/utils";
 import { queryKeys } from "../lib/queryKeys";
@@ -101,7 +102,7 @@ function SortableCompanyItem({
       <Tooltip delayDuration={300}>
         <TooltipTrigger asChild>
           <a
-            href={`/${company.issuePrefix}/dashboard`}
+            href={`/${companyRouteKey(company)}/dashboard`}
             onClick={(e) => {
               e.preventDefault();
               onSelect();
@@ -295,7 +296,7 @@ export function CompanyRail() {
                 onSelect={() => {
                   setSelectedCompanyId(company.id);
                   if (isInstanceRoute) {
-                    navigate(`/${company.issuePrefix}/dashboard`);
+                    navigate(`/${companyRouteKey(company)}/dashboard`);
                   }
                 }}
               />

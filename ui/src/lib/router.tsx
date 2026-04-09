@@ -4,8 +4,9 @@ import type { NavigateOptions, To } from "react-router-dom";
 import { useCompany } from "@/context/CompanyContext";
 import {
   applyCompanyPrefix,
+  companyRouteKey,
   extractCompanyPrefixFromPath,
-  normalizeCompanyPrefix,
+  normalizeCompanyRouteKey,
 } from "@/lib/company-routes";
 
 function resolveTo(to: To, companyPrefix: string | null): To {
@@ -29,13 +30,13 @@ function useActiveCompanyPrefix(): string | null {
   const location = RouterDom.useLocation();
 
   if (params.companyPrefix) {
-    return normalizeCompanyPrefix(params.companyPrefix);
+    return normalizeCompanyRouteKey(params.companyPrefix);
   }
 
   const pathPrefix = extractCompanyPrefixFromPath(location.pathname);
   if (pathPrefix) return pathPrefix;
 
-  return selectedCompany ? normalizeCompanyPrefix(selectedCompany.issuePrefix) : null;
+  return selectedCompany ? companyRouteKey(selectedCompany) : null;
 }
 
 export * from "react-router-dom";

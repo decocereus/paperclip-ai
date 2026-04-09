@@ -9,6 +9,7 @@ export function normalizeRememberedInstanceSettingsPath(rawPath: string | null):
   const hash = match?.[3] ?? "";
 
   if (
+    pathname === "/instance/settings/roadmap" ||
     pathname === "/instance/settings/general" ||
     pathname === "/instance/settings/runtime-sources" ||
     pathname === "/instance/settings/heartbeats" ||

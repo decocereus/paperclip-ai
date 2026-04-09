@@ -17,6 +17,7 @@ export const queryKeys = {
     detail: (id: string) => ["agents", "detail", id] as const,
     runtimeState: (id: string) => ["agents", "runtime-state", id] as const,
     taskSessions: (id: string) => ["agents", "task-sessions", id] as const,
+    conversation: (id: string) => ["agents", "conversation", id] as const,
     skills: (id: string) => ["agents", "skills", id] as const,
     instructionsBundle: (id: string) => ["agents", "instructions-bundle", id] as const,
     instructionsFile: (id: string, relativePath: string) =>
@@ -107,6 +108,7 @@ export const queryKeys = {
     runtimeSourcesOpenClawSessions: ["instance", "runtime-sources-openclaw-sessions"] as const,
     runtimeSourcesOpenClawSkills: ["instance", "runtime-sources-openclaw-skills"] as const,
     runtimeSourcesOpenClawGatewayToken: ["instance", "runtime-sources-openclaw-gateway-token"] as const,
+    roadmap: ["instance", "roadmap"] as const,
   },
   health: ["health"] as const,
   secrets: {

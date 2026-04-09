@@ -7,6 +7,7 @@ export interface Company {
   status: CompanyStatus;
   pauseReason: PauseReason | null;
   pausedAt: Date | null;
+  urlSlug: string;
   issuePrefix: string;
   issueCounter: number;
   budgetMonthlyCents: number;

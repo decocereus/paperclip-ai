@@ -34,7 +34,7 @@ describe("resolveRouteOnboardingOptions", () => {
       resolveRouteOnboardingOptions({
         pathname: "/pap/onboarding",
         companyPrefix: "pap",
-        companies: [{ id: "company-1", issuePrefix: "PAP" }],
+        companies: [{ id: "company-1", name: "Paperclip", issuePrefix: "PAP" }],
       }),
     ).toEqual({ initialStep: 2, companyId: "company-1" });
   });

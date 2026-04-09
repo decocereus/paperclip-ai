@@ -1,6 +1,10 @@
+import { matchesCompanyRouteKey } from "./company-routes";
+
 type OnboardingRouteCompany = {
   id: string;
+  name: string;
   issuePrefix: string;
+  urlSlug?: string | null;
 };
 
 export function isOnboardingPath(pathname: string): boolean {
@@ -31,10 +35,7 @@ export function resolveRouteOnboardingOptions(params: {
   }
 
   const matchedCompany =
-    companies.find(
-      (company) =>
-        company.issuePrefix.toUpperCase() === companyPrefix.toUpperCase(),
-    ) ?? null;
+    companies.find((company) => matchesCompanyRouteKey(company, companyPrefix)) ?? null;
 
   if (!matchedCompany) {
     return { initialStep: 1 };

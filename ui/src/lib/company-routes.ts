@@ -1,5 +1,7 @@
 const BOARD_ROUTE_ROOTS = new Set([
   "dashboard",
+  "meeting",
+  "chat",
   "companies",
   "company",
   "skills",
@@ -22,6 +24,37 @@ const GLOBAL_ROUTE_ROOTS = new Set(["auth", "invite", "board-claim", "cli-auth",
 
 export function normalizeCompanyPrefix(prefix: string): string {
   return prefix.trim().toUpperCase();
+}
+
+export function normalizeCompanyRouteKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export type CompanyRouteLike = {
+  name: string;
+  issuePrefix: string;
+  urlSlug?: string | null;
+};
+
+export function slugifyCompanyName(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "company";
+}
+
+export function companyRouteKey(company: CompanyRouteLike): string {
+  return normalizeCompanyRouteKey(company.urlSlug?.trim() || slugifyCompanyName(company.name));
+}
+
+export function matchesCompanyRouteKey(company: CompanyRouteLike, routeKey: string): boolean {
+  const normalized = normalizeCompanyRouteKey(routeKey);
+  return (
+    normalized === companyRouteKey(company) ||
+    normalized === normalizeCompanyPrefix(company.issuePrefix).toLowerCase()
+  );
 }
 
 function splitPath(path: string): { pathname: string; search: string; hash: string } {
@@ -58,7 +91,7 @@ export function extractCompanyPrefixFromPath(pathname: string): string | null {
   if (GLOBAL_ROUTE_ROOTS.has(first) || BOARD_ROUTE_ROOTS.has(first)) {
     return null;
   }
-  return normalizeCompanyPrefix(segments[0]!);
+  return normalizeCompanyRouteKey(segments[0]!);
 }
 
 export function applyCompanyPrefix(path: string, companyPrefix: string | null | undefined): string {
@@ -67,7 +100,7 @@ export function applyCompanyPrefix(path: string, companyPrefix: string | null | 
   if (isGlobalPath(pathname)) return path;
   if (!companyPrefix) return path;
 
-  const prefix = normalizeCompanyPrefix(companyPrefix);
+  const prefix = normalizeCompanyRouteKey(companyPrefix);
   const activePrefix = extractCompanyPrefixFromPath(pathname);
   if (activePrefix) return path;
 

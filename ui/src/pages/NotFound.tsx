@@ -4,6 +4,7 @@ import { AlertTriangle, Compass } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useCompany } from "../context/CompanyContext";
+import { companyRouteKey } from "../lib/company-routes";
 
 type NotFoundScope = "board" | "invalid_company_prefix" | "global";
 
@@ -22,7 +23,7 @@ export function NotFoundPage({ scope = "global", requestedPrefix }: NotFoundPage
   }, [setBreadcrumbs]);
 
   const fallbackCompany = selectedCompany ?? companies[0] ?? null;
-  const dashboardHref = fallbackCompany ? `/${fallbackCompany.issuePrefix}/dashboard` : "/";
+  const dashboardHref = fallbackCompany ? `/${companyRouteKey(fallbackCompany)}/dashboard` : "/";
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const normalizedPrefix = requestedPrefix?.toUpperCase();
 

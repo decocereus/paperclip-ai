@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "@/lib/router";
 import { useCompany } from "../context/CompanyContext";
-import { toCompanyRelativePath } from "../lib/company-routes";
+import { companyRouteKey, toCompanyRelativePath } from "../lib/company-routes";
 import {
   getRememberedPathOwnerCompanyId,
   isRememberableCompanyPath,
@@ -71,7 +71,7 @@ export function useCompanyPageMemory() {
           path: paths[selectedCompanyId],
           companyPrefix: selectedCompany.issuePrefix,
         });
-        navigate(`/${selectedCompany.issuePrefix}${targetPath}`, { replace: true });
+        navigate(`/${companyRouteKey(selectedCompany)}${targetPath}`, { replace: true });
       }
     }
     prevCompanyId.current = selectedCompanyId;

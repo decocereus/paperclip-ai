@@ -1,5 +1,6 @@
 import {
   extractCompanyPrefixFromPath,
+  matchesCompanyRouteKey,
   normalizeCompanyPrefix,
   toCompanyRelativePath,
 } from "./company-routes";
@@ -15,15 +16,14 @@ export function isRememberableCompanyPath(path: string): boolean {
   return true;
 }
 
-function findCompanyByPrefix<T extends { id: string; issuePrefix: string }>(params: {
+function findCompanyByPrefix<T extends { id: string; issuePrefix: string; name: string; urlSlug?: string | null }>(params: {
   companies: T[];
   companyPrefix: string;
 }): T | null {
-  const normalizedPrefix = normalizeCompanyPrefix(params.companyPrefix);
-  return params.companies.find((company) => normalizeCompanyPrefix(company.issuePrefix) === normalizedPrefix) ?? null;
+  return params.companies.find((company) => matchesCompanyRouteKey(company, params.companyPrefix)) ?? null;
 }
 
-export function getRememberedPathOwnerCompanyId<T extends { id: string; issuePrefix: string }>(params: {
+export function getRememberedPathOwnerCompanyId<T extends { id: string; issuePrefix: string; name: string; urlSlug?: string | null }>(params: {
   companies: T[];
   pathname: string;
   fallbackCompanyId: string | null;

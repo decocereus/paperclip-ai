@@ -5,8 +5,8 @@ import {
 } from "../lib/company-page-memory";
 
 const companies = [
-  { id: "for", issuePrefix: "FOR" },
-  { id: "pap", issuePrefix: "PAP" },
+  { id: "for", name: "Forage", issuePrefix: "FOR" },
+  { id: "pap", name: "Paperclip", issuePrefix: "PAP" },
 ];
 
 describe("getRememberedPathOwnerCompanyId", () => {

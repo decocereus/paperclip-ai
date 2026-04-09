@@ -40,6 +40,7 @@ import { RunButton, PauseResumeButton } from "../components/AgentActionButtons";
 import { BudgetPolicyCard } from "../components/BudgetPolicyCard";
 import { PackageFileTree, buildFileTree } from "../components/PackageFileTree";
 import { ScrollToBottom } from "../components/ScrollToBottom";
+import { IssueChatPanel } from "../components/IssueChatPanel";
 import { formatCents, formatDate, relativeTime, formatTokens, visibleRunCostUsd } from "../lib/utils";
 import { cn } from "../lib/utils";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,7 @@ import {
 } from "@paperclipai/shared";
 import { redactHomePathUserSegments, redactHomePathUserSegmentsInValue } from "@paperclipai/adapter-utils";
 import { agentRouteRef } from "../lib/utils";
+import { matchesCompanyRouteKey } from "../lib/company-routes";
 import {
   applyAgentSkillSnapshot,
   arraysEqual,
@@ -223,9 +225,10 @@ function scrollToContainerBottom(container: ScrollContainer, behavior: ScrollBeh
   container.scrollTo({ top: container.scrollHeight, behavior });
 }
 
-type AgentDetailView = "dashboard" | "instructions" | "configuration" | "skills" | "runs" | "budget";
+type AgentDetailView = "dashboard" | "chat" | "instructions" | "configuration" | "skills" | "runs" | "budget";
 
 function parseAgentDetailView(value: string | null): AgentDetailView {
+  if (value === "chat") return "chat";
   if (value === "instructions" || value === "prompts") return "instructions";
   if (value === "configure" || value === "configuration") return "configuration";
   if (value === "skills") return "skills";
@@ -627,6 +630,7 @@ export function AgentDetail() {
   const navigate = useNavigate();
   const [actionError, setActionError] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [conversationLimit, setConversationLimit] = useState(100);
   const activeView = urlRunId ? "runs" as AgentDetailView : parseAgentDetailView(urlTab ?? null);
   const needsDashboardData = activeView === "dashboard";
   const needsRunData = activeView === "runs" || Boolean(urlRunId);
@@ -639,8 +643,7 @@ export function AgentDetail() {
   const routeAgentRef = agentId ?? "";
   const routeCompanyId = useMemo(() => {
     if (!companyPrefix) return null;
-    const requestedPrefix = companyPrefix.toUpperCase();
-    return companies.find((company) => company.issuePrefix.toUpperCase() === requestedPrefix)?.id ?? null;
+    return companies.find((company) => matchesCompanyRouteKey(company, companyPrefix))?.id ?? null;
   }, [companies, companyPrefix]);
   const lookupCompanyId = routeCompanyId ?? selectedCompanyId ?? undefined;
   const canFetchAgent = routeAgentRef.length > 0 && (isUuidLike(routeAgentRef) || Boolean(lookupCompanyId));
@@ -729,6 +732,12 @@ export function AgentDetail() {
     [heartbeats],
   );
 
+  const { data: directConversation } = useQuery({
+    queryKey: [...queryKeys.agents.conversation(agentLookupRef), conversationLimit],
+    queryFn: () => agentsApi.conversation(agentLookupRef, conversationLimit, resolvedCompanyId ?? undefined),
+    enabled: Boolean(agentLookupRef) && activeView === "chat",
+  });
+
   useEffect(() => {
     if (!agent) return;
     if (urlRunId) {
@@ -737,8 +746,10 @@ export function AgentDetail() {
       }
       return;
     }
-    const canonicalTab =
-      activeView === "instructions"
+      const canonicalTab =
+      activeView === "chat"
+        ? "chat"
+        : activeView === "instructions"
         ? "instructions"
         : activeView === "configuration"
           ? "configuration"
@@ -849,6 +860,53 @@ export function AgentDetail() {
     },
   });
 
+  const sendDirectConversation = useMutation({
+    mutationFn: (body: string) => {
+      const isStreaming = directConversation?.isStreaming === true;
+      return isStreaming
+        ? agentsApi.steerConversation(agentLookupRef, body, resolvedCompanyId ?? undefined)
+        : agentsApi.sendConversation(agentLookupRef, body, resolvedCompanyId ?? undefined);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.conversation(agentLookupRef) });
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Failed to send chat message");
+    },
+  });
+
+  const interruptDirectConversation = useMutation({
+    mutationFn: () => agentsApi.interruptConversation(agentLookupRef, resolvedCompanyId ?? undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.conversation(agentLookupRef) });
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Failed to interrupt direct chat");
+    },
+  });
+
+  const resolveDirectConversationApproval = useMutation({
+    mutationFn: ({
+      requestId,
+      decision,
+    }: {
+      requestId: string;
+      decision: "accept" | "acceptForSession" | "decline" | "cancel";
+    }) =>
+      agentsApi.resolveConversationApproval(
+        agentLookupRef,
+        requestId,
+        decision,
+        resolvedCompanyId ?? undefined,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.conversation(agentLookupRef) });
+    },
+    onError: (err) => {
+      setActionError(err instanceof Error ? err.message : "Failed to resolve chat approval");
+    },
+  });
+
   useEffect(() => {
     const crumbs: { label: string; href?: string }[] = [
       { label: "Agents", href: "/agents" },
@@ -861,6 +919,8 @@ export function AgentDetail() {
       if (urlRunId) {
         crumbs.push({ label: "Runs", href: `/agents/${canonicalAgentRef}/runs` });
         crumbs.push({ label: `Run ${urlRunId.slice(0, 8)}` });
+      } else if (activeView === "chat") {
+        crumbs.push({ label: "Chat" });
       } else if (activeView === "instructions") {
         crumbs.push({ label: "Instructions" });
       } else if (activeView === "configuration") {
@@ -898,6 +958,12 @@ export function AgentDetail() {
     return <Navigate to={`/agents/${canonicalAgentRef}/dashboard`} replace />;
   }
   const isPendingApproval = agent.status === "pending_approval";
+  const directChatDisabledReason =
+    isPendingApproval
+      ? "This agent is pending board approval and cannot be chatted with yet."
+      : agent.status === "terminated"
+        ? "This agent is terminated."
+        : null;
   const showConfigActionBar = (activeView === "configuration" || activeView === "instructions") && (configDirty || configSaving);
 
   return (
@@ -1006,6 +1072,7 @@ export function AgentDetail() {
           <PageTabBar
             items={[
               { value: "dashboard", label: "Dashboard" },
+              { value: "chat", label: "Chat" },
               { value: "instructions", label: "Instructions" },
               { value: "skills", label: "Skills" },
               { value: "configuration", label: "Configuration" },
@@ -1090,6 +1157,36 @@ export function AgentDetail() {
           runtimeState={runtimeState}
           agentId={agent.id}
           agentRouteId={canonicalAgentRef}
+        />
+      )}
+
+      {activeView === "chat" && (
+        <IssueChatPanel
+          runtimeLink={directConversation?.runtimeLink ?? null}
+          conversation={directConversation}
+          conversationLimit={conversationLimit}
+          fallbackComments={[]}
+          agentMap={new Map([[agent.id, agent]])}
+          assistantName={agent.name}
+          panelTitle="Agent Chat"
+          linkedDescription="Talk directly to this agent here about responsibilities, open work, routines, and self-configuration."
+          unlinkedDescription="Start a direct runtime conversation with this agent."
+          readyDescription="Send a message to start the direct chat with this agent."
+          allowSendWithoutRuntimeLink
+          defaultPlaceholder="Talk to this agent about responsibilities, tasks, routines, or changes..."
+          currentUserId={null}
+          composerDisabledReason={directChatDisabledReason}
+          isSending={sendDirectConversation.isPending}
+          isInterrupting={interruptDirectConversation.isPending}
+          isResolvingApproval={resolveDirectConversationApproval.isPending}
+          onLoadOlder={() => setConversationLimit((current) => Math.min(current + 100, 1000))}
+          onSend={async (body) => {
+            await sendDirectConversation.mutateAsync(body);
+          }}
+          onInterrupt={() => interruptDirectConversation.mutate()}
+          onResolveApproval={(requestId, decision) =>
+            resolveDirectConversationApproval.mutate({ requestId, decision })
+          }
         />
       )}
 

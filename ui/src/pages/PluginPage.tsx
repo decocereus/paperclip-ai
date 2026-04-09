@@ -5,6 +5,7 @@ import { useCompany } from "@/context/CompanyContext";
 import { useBreadcrumbs } from "@/context/BreadcrumbContext";
 import { pluginsApi } from "@/api/plugins";
 import { queryKeys } from "@/lib/queryKeys";
+import { companyRouteKey, matchesCompanyRouteKey } from "@/lib/company-routes";
 import { PluginSlotMount } from "@/plugins/slots";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
@@ -28,8 +29,7 @@ export function PluginPage() {
   const { setBreadcrumbs } = useBreadcrumbs();
   const routeCompany = useMemo(() => {
     if (!routeCompanyPrefix) return null;
-    const requested = routeCompanyPrefix.toUpperCase();
-    return companies.find((c) => c.issuePrefix.toUpperCase() === requested) ?? null;
+    return companies.find((c) => matchesCompanyRouteKey(c, routeCompanyPrefix)) ?? null;
   }, [companies, routeCompanyPrefix]);
   const hasInvalidCompanyPrefix = Boolean(routeCompanyPrefix) && !routeCompany;
 
@@ -40,7 +40,11 @@ export function PluginPage() {
   }, [routeCompany, routeCompanyPrefix, selectedCompanyId]);
 
   const companyPrefix = useMemo(
-    () => (resolvedCompanyId ? companies.find((c) => c.id === resolvedCompanyId)?.issuePrefix ?? null : null),
+    () => {
+      if (!resolvedCompanyId) return null;
+      const company = companies.find((c) => c.id === resolvedCompanyId) ?? null;
+      return company ? companyRouteKey(company) : null;
+    },
     [companies, resolvedCompanyId],
   );
 

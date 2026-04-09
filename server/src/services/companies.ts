@@ -30,12 +30,14 @@ import { notFound, unprocessable } from "../errors.js";
 
 export function companyService(db: Db) {
   const ISSUE_PREFIX_FALLBACK = "CMP";
+  const URL_SLUG_FALLBACK = "company";
 
   const companySelection = {
     id: companies.id,
     name: companies.name,
     description: companies.description,
     status: companies.status,
+    urlSlug: companies.urlSlug,
     issuePrefix: companies.issuePrefix,
     issueCounter: companies.issueCounter,
     budgetMonthlyCents: companies.budgetMonthlyCents,
@@ -113,9 +115,27 @@ export function companyService(db: Db) {
     return normalized.slice(0, 3) || ISSUE_PREFIX_FALLBACK;
   }
 
+  function normalizeCompanyUrlSlug(value: string) {
+    const slug = value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return slug || URL_SLUG_FALLBACK;
+  }
+
+  function deriveCompanyUrlSlugBase(name: string) {
+    return normalizeCompanyUrlSlug(name);
+  }
+
   function suffixForAttempt(attempt: number) {
     if (attempt <= 1) return "";
     return "A".repeat(attempt - 1);
+  }
+
+  function slugSuffixForAttempt(attempt: number) {
+    if (attempt <= 1) return "";
+    return `-${attempt}`;
   }
 
   function isIssuePrefixConflict(error: unknown) {
@@ -131,23 +151,68 @@ export function companyService(db: Db) {
       && constraint === "companies_issue_prefix_idx";
   }
 
+  function isUrlSlugConflict(error: unknown) {
+    const constraint = typeof error === "object" && error !== null && "constraint" in error
+      ? (error as { constraint?: string }).constraint
+      : typeof error === "object" && error !== null && "constraint_name" in error
+        ? (error as { constraint_name?: string }).constraint_name
+        : undefined;
+    return typeof error === "object"
+      && error !== null
+      && "code" in error
+      && (error as { code?: string }).code === "23505"
+      && constraint === "companies_url_slug_idx";
+  }
+
   async function createCompanyWithUniquePrefix(data: typeof companies.$inferInsert) {
     const base = deriveIssuePrefixBase(data.name);
-    let suffix = 1;
-    while (suffix < 10000) {
-      const candidate = `${base}${suffixForAttempt(suffix)}`;
+    const slugBase = data.urlSlug ? normalizeCompanyUrlSlug(data.urlSlug) : deriveCompanyUrlSlugBase(data.name);
+    let prefixAttempt = 1;
+    let slugAttempt = 1;
+    while (prefixAttempt < 10000 && slugAttempt < 10000) {
+      const candidate = `${base}${suffixForAttempt(prefixAttempt)}`;
+      const candidateSlug = `${slugBase}${slugSuffixForAttempt(slugAttempt)}`;
       try {
         const rows = await db
           .insert(companies)
-          .values({ ...data, issuePrefix: candidate })
+          .values({ ...data, issuePrefix: candidate, urlSlug: candidateSlug })
           .returning();
         return rows[0];
       } catch (error) {
-        if (!isIssuePrefixConflict(error)) throw error;
+        if (isIssuePrefixConflict(error)) {
+          prefixAttempt += 1;
+          continue;
+        }
+        if (isUrlSlugConflict(error)) {
+          slugAttempt += 1;
+          continue;
+        }
+        throw error;
       }
-      suffix += 1;
     }
-    throw new Error("Unable to allocate unique issue prefix");
+    throw new Error("Unable to allocate unique company route identifiers");
+  }
+
+  async function allocateUniqueUrlSlug(
+    nameOrSlug: string,
+    currentCompanyId?: string | null,
+    database: Pick<Db, "select"> = db,
+  ) {
+    const base = normalizeCompanyUrlSlug(nameOrSlug);
+    let attempt = 1;
+    while (attempt < 10000) {
+      const candidate = `${base}${slugSuffixForAttempt(attempt)}`;
+      const existing = await database
+        .select({ id: companies.id })
+        .from(companies)
+        .where(eq(companies.urlSlug, candidate))
+        .then((rows) => rows[0] ?? null);
+      if (!existing || existing.id === currentCompanyId) {
+        return candidate;
+      }
+      attempt += 1;
+    }
+    throw new Error("Unable to allocate unique company url slug");
   }
 
   return {
@@ -187,6 +252,18 @@ export function companyService(db: Db) {
         if (!existing) return null;
 
         const { logoAssetId, ...companyPatch } = data;
+        const nextCompanyPatch = { ...companyPatch };
+
+        if (companyPatch.urlSlug !== undefined) {
+          const requestedSlug = typeof companyPatch.urlSlug === "string" ? companyPatch.urlSlug : "";
+          nextCompanyPatch.urlSlug = await allocateUniqueUrlSlug(
+            requestedSlug || (typeof companyPatch.name === "string" ? companyPatch.name : existing.name),
+            id,
+            tx,
+          );
+        } else if (typeof companyPatch.name === "string" && companyPatch.name.trim().length > 0) {
+          nextCompanyPatch.urlSlug = await allocateUniqueUrlSlug(companyPatch.name, id, tx);
+        }
 
         if (logoAssetId !== undefined && logoAssetId !== null) {
           const nextLogoAsset = await tx
@@ -202,7 +279,7 @@ export function companyService(db: Db) {
 
         const updated = await tx
           .update(companies)
-          .set({ ...companyPatch, updatedAt: new Date() })
+          .set({ ...nextCompanyPatch, updatedAt: new Date() })
           .where(eq(companies.id, id))
           .returning()
           .then((rows) => rows[0] ?? null);

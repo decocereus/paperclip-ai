@@ -42,6 +42,7 @@ import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
 import { DEFAULT_OPENCLAW_GATEWAY_URL } from "@paperclipai/adapter-openclaw-gateway";
 import { resolveRouteOnboardingOptions } from "../lib/onboarding-route";
+import { companyRouteKey } from "../lib/company-routes";
 import { AsciiArtAnimation } from "./AsciiArtAnimation";
 import {
   Building2,
@@ -145,7 +146,7 @@ export function OnboardingWizard() {
   const [createdCompanyId, setCreatedCompanyId] = useState<string | null>(
     existingCompanyId ?? null
   );
-  const [createdCompanyPrefix, setCreatedCompanyPrefix] = useState<
+  const [createdCompanyRouteKey, setCreatedCompanyRouteKey] = useState<
     string | null
   >(null);
   const [createdCompanyGoalId, setCreatedCompanyGoalId] = useState<string | null>(
@@ -167,7 +168,7 @@ export function OnboardingWizard() {
     const cId = effectiveOnboardingOptions.companyId ?? null;
     setStep(effectiveOnboardingOptions.initialStep ?? 1);
     setCreatedCompanyId(cId);
-    setCreatedCompanyPrefix(null);
+    setCreatedCompanyRouteKey(null);
     setCreatedCompanyGoalId(null);
     setCreatedProjectId(null);
     setCreatedAgentId(null);
@@ -179,12 +180,12 @@ export function OnboardingWizard() {
     effectiveOnboardingOptions.initialStep
   ]);
 
-  // Backfill issue prefix for an existing company once companies are loaded.
+  // Backfill route key for an existing company once companies are loaded.
   useEffect(() => {
-    if (!effectiveOnboardingOpen || !createdCompanyId || createdCompanyPrefix) return;
+    if (!effectiveOnboardingOpen || !createdCompanyId || createdCompanyRouteKey) return;
     const company = companies.find((c) => c.id === createdCompanyId);
-    if (company) setCreatedCompanyPrefix(company.issuePrefix);
-  }, [effectiveOnboardingOpen, createdCompanyId, createdCompanyPrefix, companies]);
+    if (company) setCreatedCompanyRouteKey(companyRouteKey(company));
+  }, [effectiveOnboardingOpen, createdCompanyId, createdCompanyRouteKey, companies]);
 
   // Resize textarea when step 3 is shown or description changes
   useEffect(() => {
@@ -319,7 +320,7 @@ export function OnboardingWizard() {
     setTaskDescription(DEFAULT_TASK_DESCRIPTION);
     setRepoPath("");
     setCreatedCompanyId(null);
-    setCreatedCompanyPrefix(null);
+    setCreatedCompanyRouteKey(null);
     setCreatedCompanyGoalId(null);
     setCreatedAgentId(null);
     setCreatedProjectId(null);
@@ -405,7 +406,7 @@ export function OnboardingWizard() {
     try {
       const company = await companiesApi.create({ name: companyName.trim() });
       setCreatedCompanyId(company.id);
-      setCreatedCompanyPrefix(company.issuePrefix);
+      setCreatedCompanyRouteKey(companyRouteKey(company));
       setSelectedCompanyId(company.id);
       queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
 
@@ -638,8 +639,8 @@ export function OnboardingWizard() {
       reset();
       closeOnboarding();
       navigate(
-        createdCompanyPrefix
-          ? `/${createdCompanyPrefix}/issues/${issueRef}`
+        createdCompanyRouteKey
+          ? `/${createdCompanyRouteKey}/issues/${issueRef}`
           : `/issues/${issueRef}`
       );
     } catch (err) {

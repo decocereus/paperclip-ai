@@ -6,6 +6,9 @@ import {
 
 describe("normalizeRememberedInstanceSettingsPath", () => {
   it("keeps known instance settings pages", () => {
+    expect(normalizeRememberedInstanceSettingsPath("/instance/settings/roadmap")).toBe(
+      "/instance/settings/roadmap",
+    );
     expect(normalizeRememberedInstanceSettingsPath("/instance/settings/general")).toBe(
       "/instance/settings/general",
     );

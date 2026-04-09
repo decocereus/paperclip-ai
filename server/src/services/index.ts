@@ -11,6 +11,11 @@ export { issueApprovalService } from "./issue-approvals.js";
 export { issueRuntimeLinkService } from "./issue-runtime-links.js";
 export { issueConversationApprovalService } from "./issue-conversation-approvals.js";
 export { readIssueConversation, parseOpenClawSessionJsonl } from "./runtime-conversations.js";
+export {
+  getExistingOpenClawLiveConversationSession,
+  getOrCreateOpenClawLiveConversationSession,
+} from "./openclaw-live-conversations.js";
+export { instanceRoadmapService } from "./instance-roadmap.js";
 export { goalService } from "./goals.js";
 export { activityService, type ActivityFilters } from "./activity.js";
 export { approvalService } from "./approvals.js";

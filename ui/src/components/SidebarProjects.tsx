@@ -13,6 +13,7 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useCompany } from "../context/CompanyContext";
+import { companyRouteKey } from "../lib/company-routes";
 import { useDialog } from "../context/DialogContext";
 import { useSidebar } from "../context/SidebarContext";
 import { authApi } from "../api/auth";
@@ -218,7 +219,7 @@ export function SidebarProjects() {
                   key={project.id}
                   activeProjectRef={activeProjectRef}
                   companyId={selectedCompanyId}
-                  companyPrefix={selectedCompany?.issuePrefix ?? null}
+                  companyPrefix={selectedCompany ? companyRouteKey(selectedCompany) : null}
                   isMobile={isMobile}
                   project={project}
                   projectSidebarSlots={projectSidebarSlots}
