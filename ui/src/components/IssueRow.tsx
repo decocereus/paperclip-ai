@@ -19,6 +19,7 @@ interface IssueRowProps {
   desktopTrailing?: ReactNode;
   trailingMeta?: ReactNode;
   titleSuffix?: ReactNode;
+  metaBadges?: ReactNode;
   unreadState?: UnreadState | null;
   onMarkRead?: () => void;
   onArchive?: () => void;
@@ -37,6 +38,7 @@ export function IssueRow({
   desktopTrailing,
   trailingMeta,
   titleSuffix,
+  metaBadges,
   unreadState = null,
   onMarkRead,
   onArchive,
@@ -88,6 +90,9 @@ export function IssueRow({
               </span>
               <span className="text-xs text-muted-foreground sm:hidden">{mobileMeta}</span>
             </>
+          ) : null}
+          {metaBadges ? (
+            <span className="inline-flex items-center gap-1">{metaBadges}</span>
           ) : null}
         </span>
       </span>

@@ -1490,9 +1490,20 @@ export function issueService(db: Db) {
 
         const issueNumber = company.issueCounter;
         const identifier = `${company.issuePrefix}-${issueNumber}`;
+        const creationContext =
+          issueData.creationContext ?? {
+            sourceKind: issueData.originKind === "routine_execution" ? "routine" : "manual",
+            sourceAgentId: issueData.createdByAgentId ?? null,
+            sourceIssueId: null,
+            sourceMessageId: null,
+            sourceActionId: null,
+            requestText: null,
+            reason: null,
+          };
 
         const values = {
           ...issueData,
+          creationContext,
           originKind: issueData.originKind ?? "manual",
           goalId: resolveIssueGoalId({
             projectId: issueData.projectId,

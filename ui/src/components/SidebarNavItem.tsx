@@ -39,7 +39,7 @@ export function SidebarNavItem({
       onClick={() => { if (isMobile) setSidebarOpen(false); }}
       className={({ isActive }) =>
         cn(
-          "flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors",
+          "flex min-w-0 items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-colors",
           isActive
             ? "bg-accent text-foreground"
             : "text-foreground/80 hover:bg-accent/50 hover:text-foreground",
@@ -53,11 +53,11 @@ export function SidebarNavItem({
           <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red-500 shadow-[0_0_0_2px_hsl(var(--background))]" />
         )}
       </span>
-      <span className="flex-1 truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate whitespace-nowrap">{label}</span>
       {textBadge && (
         <span
           className={cn(
-            "ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none",
+            "ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none",
             textBadgeTone === "amber"
               ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
               : "bg-muted text-muted-foreground",
@@ -67,7 +67,7 @@ export function SidebarNavItem({
         </span>
       )}
       {liveCount != null && liveCount > 0 && (
-        <span className="ml-auto flex items-center gap-1.5">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <span className="relative flex h-2 w-2">
             <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
@@ -78,7 +78,7 @@ export function SidebarNavItem({
       {badge != null && badge > 0 && (
         <span
           className={cn(
-            "ml-auto rounded-full px-1.5 py-0.5 text-xs leading-none",
+            "ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-xs leading-none",
             badgeTone === "danger"
               ? "bg-red-600/90 text-red-50"
               : "bg-primary text-primary-foreground",

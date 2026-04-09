@@ -544,6 +544,8 @@ export async function startServer(): Promise<StartedServer> {
     resolveSession,
   });
   const server = createServer(app as unknown as Parameters<typeof createServer>[0]);
+  const bridgeSocketPath = `/tmp/paperclip-bridge-${listenPort}.sock`;
+  const bridgeServer = createServer(app as unknown as Parameters<typeof createServer>[0]);
   
   if (listenPort !== config.port) {
     logger.warn(`Requested port is busy; using next free port (requestedPort=${config.port}, selectedPort=${listenPort})`);
@@ -557,6 +559,7 @@ export async function startServer(): Promise<StartedServer> {
   process.env.PAPERCLIP_LISTEN_HOST = runtimeListenHost;
   process.env.PAPERCLIP_LISTEN_PORT = String(listenPort);
   process.env.PAPERCLIP_API_URL = `http://${runtimeApiHost}:${listenPort}`;
+  process.env.PAPERCLIP_BRIDGE_SOCKET_PATH = bridgeSocketPath;
   
   setupLiveEventsWebSocketServer(server, db as any, {
     deploymentMode: config.deploymentMode,
@@ -735,6 +738,26 @@ export async function startServer(): Promise<StartedServer> {
       resolveListen();
     });
   });
+
+  try {
+    rmSync(bridgeSocketPath, { force: true });
+  } catch {
+    // ignore stale socket cleanup failures
+  }
+
+  await new Promise<void>((resolveListen, rejectListen) => {
+    const onError = (err: Error) => {
+      bridgeServer.off("error", onError);
+      rejectListen(err);
+    };
+
+    bridgeServer.once("error", onError);
+    bridgeServer.listen(bridgeSocketPath, () => {
+      bridgeServer.off("error", onError);
+      logger.info({ socketPath: bridgeSocketPath }, "Paperclip bridge socket listening");
+      resolveListen();
+    });
+  });
   
   {
     const shutdown = async (signal: "SIGINT" | "SIGTERM") => {
@@ -751,6 +774,17 @@ export async function startServer(): Promise<StartedServer> {
         } catch (err) {
           logger.error({ err }, "Failed to stop embedded PostgreSQL cleanly");
         }
+      }
+
+      try {
+        bridgeServer.close();
+      } catch {
+        // ignore bridge socket shutdown failures
+      }
+      try {
+        rmSync(bridgeSocketPath, { force: true });
+      } catch {
+        // ignore stale socket cleanup failures
       }
 
       process.exit(0);

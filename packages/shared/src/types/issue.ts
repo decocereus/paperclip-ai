@@ -131,6 +131,8 @@ export interface IssueRuntimeLink {
 }
 
 export type IssueConversationItemRole = "user" | "assistant" | "tool" | "system";
+export type IssueConversationItemKind = "message" | "reasoning" | "tool_call" | "status";
+export type IssueConversationItemStatus = "in_progress" | "completed" | "failed" | "waiting";
 
 export interface IssueConversationItem {
   id: string;
@@ -138,7 +140,23 @@ export interface IssueConversationItem {
   text: string;
   createdAt: string | null;
   source: IssueRuntimeKind;
+  kind?: IssueConversationItemKind | null;
+  title?: string | null;
+  status?: IssueConversationItemStatus | null;
+  metadataJson?: Record<string, unknown> | null;
   rawType?: string | null;
+}
+
+export interface IssueConversationRuntimeInfo {
+  runtimeKind: IssueRuntimeKind;
+  externalConversationId: string;
+  externalConversationLabel: string | null;
+  model: string | null;
+  provider: string | null;
+  thinking: string | null;
+  reasoning: string | null;
+  sessionKey: string | null;
+  metadataJson: Record<string, unknown> | null;
 }
 
 export interface IssueConversationPendingApproval {
@@ -159,9 +177,20 @@ export interface IssueConversationSnapshot {
   sourceStatus: "unlinked" | "ok" | "source_unavailable" | "error";
   activeTurnId: string | null;
   isStreaming: boolean;
+  runtimeInfo: IssueConversationRuntimeInfo | null;
   pendingApprovals: IssueConversationPendingApproval[];
   items: IssueConversationItem[];
   error: string | null;
+}
+
+export interface IssueCreationContext extends Record<string, unknown> {
+  sourceKind: "agent_chat" | "agent_chat_fallback" | "manual" | "routine" | "automation";
+  sourceAgentId: string | null;
+  sourceIssueId: string | null;
+  sourceMessageId: string | null;
+  sourceActionId: string | null;
+  requestText: string | null;
+  reason: string | null;
 }
 
 export interface Issue {
@@ -184,6 +213,7 @@ export interface Issue {
   executionLockedAt: Date | null;
   createdByAgentId: string | null;
   createdByUserId: string | null;
+  creationContext?: IssueCreationContext | null;
   issueNumber: number | null;
   identifier: string | null;
   originKind?: IssueOriginKind;

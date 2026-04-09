@@ -411,8 +411,22 @@ export function buildPaperclipEnv(agent: { id: string; companyId: string }): Rec
     process.env.PAPERCLIP_LISTEN_HOST ?? process.env.HOST ?? "localhost",
   );
   const runtimePort = process.env.PAPERCLIP_LISTEN_PORT ?? process.env.PORT ?? "3100";
-  const apiUrl = process.env.PAPERCLIP_API_URL ?? `http://${runtimeHost}:${runtimePort}`;
+  const runtimeApiUrl = `http://${runtimeHost}:${runtimePort}`;
+  const explicitApiUrl = process.env.PAPERCLIP_API_URL?.trim();
+  const hasRuntimeListenPort =
+    typeof process.env.PAPERCLIP_LISTEN_PORT === "string" &&
+    process.env.PAPERCLIP_LISTEN_PORT.trim().length > 0;
+  // Prefer runtime listen host/port when available so inherited/stale PAPERCLIP_API_URL
+  // values cannot drift from the active server port.
+  const apiUrl = hasRuntimeListenPort ? runtimeApiUrl : explicitApiUrl || runtimeApiUrl;
   vars.PAPERCLIP_API_URL = apiUrl;
+  const bridgeCwd = process.cwd();
+  const bridgeScript = path.join(bridgeCwd, "scripts", "paperclip-agent-bridge.sh");
+  vars.PAPERCLIP_BRIDGE_CWD = bridgeCwd;
+  if (process.env.PAPERCLIP_BRIDGE_SOCKET_PATH?.trim()) {
+    vars.PAPERCLIP_BRIDGE_SOCKET_PATH = process.env.PAPERCLIP_BRIDGE_SOCKET_PATH.trim();
+  }
+  vars.PAPERCLIP_BRIDGE_COMMAND = bridgeScript;
   return vars;
 }
 

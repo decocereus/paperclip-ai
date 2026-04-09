@@ -40,6 +40,14 @@ function defaultExecutionWorkspaceModeForProject(project: { executionWorkspacePo
   return "shared_workspace";
 }
 
+function issueCreationSourceLabel(sourceKind: NonNullable<Issue["creationContext"]>["sourceKind"]) {
+  if (sourceKind === "agent_chat") return "Agent chat";
+  if (sourceKind === "agent_chat_fallback") return "Agent bridge fallback";
+  if (sourceKind === "routine") return "Routine";
+  if (sourceKind === "automation") return "Automation";
+  return "Manual";
+}
+
 interface IssuePropertiesProps {
   issue: Issue;
   onUpdate: (data: Record<string, unknown>) => void;
@@ -229,6 +237,14 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
   const userLabel = (userId: string | null | undefined) => formatAssigneeUserLabel(userId, currentUserId);
   const assigneeUserLabel = userLabel(issue.assigneeUserId);
   const creatorUserLabel = userLabel(issue.createdByUserId);
+  const creationContext = issue.creationContext ?? null;
+  const creationReason = creationContext?.requestText ?? creationContext?.reason ?? null;
+  const creationBrief =
+    creationContext?.requestText &&
+    creationContext?.reason &&
+    creationContext.reason !== creationContext.requestText
+      ? creationContext.reason
+      : null;
 
   const labelsTrigger = (issue.labels ?? []).length > 0 ? (
     <div className="flex items-center gap-1 flex-wrap">
@@ -718,6 +734,25 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
                 <span className="text-sm">{creatorUserLabel ?? "User"}</span>
               </>
             )}
+          </PropertyRow>
+        )}
+        {creationContext && (
+          <PropertyRow label="Created from">
+            <span className="text-sm">{issueCreationSourceLabel(creationContext.sourceKind)}</span>
+          </PropertyRow>
+        )}
+        {creationReason && (
+          <PropertyRow label="Why">
+            <div className="min-w-0 whitespace-pre-wrap text-sm leading-5 text-foreground/90">
+              {creationReason}
+            </div>
+          </PropertyRow>
+        )}
+        {creationBrief && (
+          <PropertyRow label="Brief">
+            <div className="min-w-0 whitespace-pre-wrap text-sm leading-5 text-muted-foreground">
+              {creationBrief}
+            </div>
           </PropertyRow>
         )}
         {issue.startedAt && (

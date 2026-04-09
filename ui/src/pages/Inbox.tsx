@@ -26,6 +26,7 @@ import { hasBlockingShortcutDialog, isKeyboardShortcutTextInputTarget } from "..
 import { EmptyState } from "../components/EmptyState";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { IssueRow } from "../components/IssueRow";
+import { IssueCreatorBadge } from "../components/IssueCreatorBadge";
 import { SwipeToArchive } from "../components/SwipeToArchive";
 
 import { StatusIcon } from "../components/StatusIcon";
@@ -1917,6 +1918,7 @@ export function Inbox() {
                     key={`issue:${issue.id}`}
                     issue={issue}
                     issueLinkState={issueLinkState}
+                    metaBadges={<IssueCreatorBadge issue={issue} agentName={agentName} />}
                     selected={isSelected}
                     className={
                       isArchiving

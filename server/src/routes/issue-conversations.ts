@@ -1,7 +1,19 @@
 import { Router } from "express";
 import type { Db } from "@paperclipai/db";
 import { addIssueCommentSchema, resolveIssueConversationApprovalSchema } from "@paperclipai/shared";
-import { approvalService, heartbeatService, issueConversationApprovalService, issueRuntimeLinkService, issueService, logActivity, readIssueConversation } from "../services/index.js";
+import { buildPaperclipEnv } from "@paperclipai/adapter-utils/server-utils";
+import {
+  agentService,
+  approvalService,
+  heartbeatService,
+  issueConversationApprovalService,
+  issueRuntimeLinkService,
+  issueService,
+  logActivity,
+  readIssueConversation,
+  secretService,
+} from "../services/index.js";
+import { createLocalAgentJwt } from "../agent-auth-jwt.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 import { validate } from "../middleware/validate.js";
 import { readConfigFile } from "../config-file.js";
@@ -9,6 +21,10 @@ import {
   getExistingCodexLiveConversationSession,
   getOrCreateCodexLiveConversationSession,
 } from "../services/codex-live-conversations.js";
+import {
+  getExistingOpenClawLiveConversationSession,
+  getOrCreateOpenClawLiveConversationSession,
+} from "../services/openclaw-live-conversations.js";
 
 export function issueConversationRoutes(db: Db) {
   const router = Router();
@@ -17,6 +33,26 @@ export function issueConversationRoutes(db: Db) {
   const conversationApprovals = issueConversationApprovalService(db);
   const approvals = approvalService(db);
   const heartbeat = heartbeatService(db);
+  const agents = agentService(db);
+  const secrets = secretService(db);
+
+  function buildLocalConversationEnv(agent: {
+    id: string;
+    companyId: string;
+    adapterType: string;
+  }) {
+    const env = { ...buildPaperclipEnv(agent) };
+    const authToken = createLocalAgentJwt(
+      agent.id,
+      agent.companyId,
+      agent.adapterType,
+      `issue-chat-${Date.now()}`,
+    );
+    if (authToken) {
+      env.PAPERCLIP_API_KEY = authToken;
+    }
+    return env;
+  }
 
   router.param("id", async (req, _res, next, rawId) => {
     try {
@@ -38,10 +74,12 @@ export function issueConversationRoutes(db: Db) {
     assertCompanyAccess(req, issue.companyId);
 
     const limitRaw = Number(req.query.limit);
-    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(1, Math.floor(limitRaw)), 200) : 100;
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(1, Math.floor(limitRaw)), 1000) : 100;
     const runtimeLink = await runtimeLinks.getForIssue(issue.id);
     const codexHome = readConfigFile()?.runtimeSources?.codex?.homeDir ?? null;
+    const openclawHome = readConfigFile()?.runtimeSources?.openclaw?.homeDir ?? null;
     if (runtimeLink?.runtimeKind === "codex" && codexHome) {
+      const assignee = issue.assigneeAgentId ? await agents.getById(issue.assigneeAgentId) : null;
       const liveSession = getExistingCodexLiveConversationSession(issue.id, runtimeLink.externalConversationId, codexHome);
       if (liveSession) {
         const snapshot = await liveSession.snapshot(issue.id, runtimeLink, limit);
@@ -52,6 +90,23 @@ export function issueConversationRoutes(db: Db) {
           pendingApprovals: snapshot.pendingApprovals,
         });
         res.json(snapshot);
+        return;
+      }
+    }
+    if (runtimeLink?.runtimeKind === "openclaw" && openclawHome && issue.assigneeAgentId) {
+      const assignee = await agents.getById(issue.assigneeAgentId);
+      if (assignee?.adapterType === "openclaw_gateway") {
+        const { config: runtimeAdapterConfig } = await secrets.resolveAdapterConfigForRuntime(
+          issue.companyId,
+          (assignee.adapterConfig ?? {}) as Record<string, unknown>,
+        );
+        const liveSession = getOrCreateOpenClawLiveConversationSession({
+          issueId: issue.id,
+          sessionKey: runtimeLink.externalConversationId,
+          openclawHome,
+          adapterConfig: runtimeAdapterConfig,
+        });
+        res.json(await liveSession.snapshot(issue.id, runtimeLink, limit));
         return;
       }
     }
@@ -76,8 +131,15 @@ export function issueConversationRoutes(db: Db) {
     });
 
     const codexHome = readConfigFile()?.runtimeSources?.codex?.homeDir ?? null;
+    const openclawHome = readConfigFile()?.runtimeSources?.openclaw?.homeDir ?? null;
     if (runtimeLink?.runtimeKind === "codex" && codexHome) {
-      const liveSession = getOrCreateCodexLiveConversationSession(issue.id, runtimeLink.externalConversationId, codexHome);
+      const assignee = issue.assigneeAgentId ? await agents.getById(issue.assigneeAgentId) : null;
+      const liveSession = getOrCreateCodexLiveConversationSession(
+        issue.id,
+        runtimeLink.externalConversationId,
+        codexHome,
+        assignee?.adapterType === "codex_local" ? buildLocalConversationEnv(assignee) : undefined,
+      );
       const turnId = await liveSession.send(req.body.body);
       await logActivity(db, {
         companyId: issue.companyId,
@@ -96,6 +158,39 @@ export function issueConversationRoutes(db: Db) {
       });
       res.status(201).json({ comment });
       return;
+    }
+    if (runtimeLink?.runtimeKind === "openclaw" && openclawHome && issue.assigneeAgentId) {
+      const assignee = await agents.getById(issue.assigneeAgentId);
+      if (assignee?.adapterType === "openclaw_gateway") {
+        const { config: runtimeAdapterConfig } = await secrets.resolveAdapterConfigForRuntime(
+          issue.companyId,
+          (assignee.adapterConfig ?? {}) as Record<string, unknown>,
+        );
+        const liveSession = getOrCreateOpenClawLiveConversationSession({
+          issueId: issue.id,
+          sessionKey: runtimeLink.externalConversationId,
+          openclawHome,
+          adapterConfig: runtimeAdapterConfig,
+        });
+        const runId = await liveSession.send(req.body.body);
+        await logActivity(db, {
+          companyId: issue.companyId,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          agentId: actor.agentId,
+          runId: actor.runId,
+          action: "issue.conversation_sent",
+          entityType: "issue",
+          entityId: issue.id,
+          details: {
+            commentId: comment.id,
+            openclawRunId: runId,
+            bodySnippet: comment.body.slice(0, 120),
+          },
+        });
+        res.status(201).json({ comment });
+        return;
+      }
     }
 
     if (issue.assigneeAgentId && !(actor.actorType === "agent" && actor.actorId === issue.assigneeAgentId)) {
@@ -156,8 +251,15 @@ export function issueConversationRoutes(db: Db) {
     });
 
     const codexHome = readConfigFile()?.runtimeSources?.codex?.homeDir ?? null;
+    const openclawHome = readConfigFile()?.runtimeSources?.openclaw?.homeDir ?? null;
     if (runtimeLink?.runtimeKind === "codex" && codexHome) {
-      const liveSession = getOrCreateCodexLiveConversationSession(issue.id, runtimeLink.externalConversationId, codexHome);
+      const assignee = issue.assigneeAgentId ? await agents.getById(issue.assigneeAgentId) : null;
+      const liveSession = getOrCreateCodexLiveConversationSession(
+        issue.id,
+        runtimeLink.externalConversationId,
+        codexHome,
+        assignee?.adapterType === "codex_local" ? buildLocalConversationEnv(assignee) : undefined,
+      );
       const turnId = await liveSession.steer(req.body.body);
       await logActivity(db, {
         companyId: issue.companyId,
@@ -176,6 +278,39 @@ export function issueConversationRoutes(db: Db) {
       });
       res.status(201).json({ comment });
       return;
+    }
+    if (runtimeLink?.runtimeKind === "openclaw" && openclawHome && issue.assigneeAgentId) {
+      const assignee = await agents.getById(issue.assigneeAgentId);
+      if (assignee?.adapterType === "openclaw_gateway") {
+        const { config: runtimeAdapterConfig } = await secrets.resolveAdapterConfigForRuntime(
+          issue.companyId,
+          (assignee.adapterConfig ?? {}) as Record<string, unknown>,
+        );
+        const liveSession = getOrCreateOpenClawLiveConversationSession({
+          issueId: issue.id,
+          sessionKey: runtimeLink.externalConversationId,
+          openclawHome,
+          adapterConfig: runtimeAdapterConfig,
+        });
+        const runId = await liveSession.steer(req.body.body);
+        await logActivity(db, {
+          companyId: issue.companyId,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          agentId: actor.agentId,
+          runId: actor.runId,
+          action: "issue.conversation_steered",
+          entityType: "issue",
+          entityId: issue.id,
+          details: {
+            commentId: comment.id,
+            openclawRunId: runId,
+            bodySnippet: comment.body.slice(0, 120),
+          },
+        });
+        res.status(201).json({ comment });
+        return;
+      }
     }
 
     if (issue.assigneeAgentId) {
@@ -233,8 +368,9 @@ export function issueConversationRoutes(db: Db) {
 
     const runtimeLink = await runtimeLinks.getForIssue(issue.id);
     const codexHome = readConfigFile()?.runtimeSources?.codex?.homeDir ?? null;
-    if (runtimeLink?.runtimeKind === "codex" && codexHome) {
-      const liveSession = getExistingCodexLiveConversationSession(issue.id, runtimeLink.externalConversationId, codexHome);
+    const openclawHome = readConfigFile()?.runtimeSources?.openclaw?.homeDir ?? null;
+      if (runtimeLink?.runtimeKind === "codex" && codexHome) {
+        const liveSession = getExistingCodexLiveConversationSession(issue.id, runtimeLink.externalConversationId, codexHome);
       const interruptedTurnId = liveSession ? await liveSession.interrupt() : null;
       const actor = getActorInfo(req);
       await logActivity(db, {
@@ -251,6 +387,48 @@ export function issueConversationRoutes(db: Db) {
         },
       });
       res.json({ interruptedRunId: interruptedTurnId });
+      return;
+    }
+    if (runtimeLink?.runtimeKind === "openclaw" && openclawHome) {
+      let interruptedRunId: string | null = null;
+      const existingLiveSession = getExistingOpenClawLiveConversationSession(
+        issue.id,
+        runtimeLink.externalConversationId,
+        openclawHome,
+      );
+      if (existingLiveSession) {
+        interruptedRunId = await existingLiveSession.interrupt();
+      } else if (issue.assigneeAgentId) {
+        const assignee = await agents.getById(issue.assigneeAgentId);
+        if (assignee?.adapterType === "openclaw_gateway") {
+          const { config: runtimeAdapterConfig } = await secrets.resolveAdapterConfigForRuntime(
+            issue.companyId,
+            (assignee.adapterConfig ?? {}) as Record<string, unknown>,
+          );
+          const liveSession = getOrCreateOpenClawLiveConversationSession({
+            issueId: issue.id,
+            sessionKey: runtimeLink.externalConversationId,
+            openclawHome,
+            adapterConfig: runtimeAdapterConfig,
+          });
+          interruptedRunId = await liveSession.interrupt();
+        }
+      }
+      const actor = getActorInfo(req);
+      await logActivity(db, {
+        companyId: issue.companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        action: "issue.conversation_interrupted",
+        entityType: "issue",
+        entityId: issue.id,
+        details: {
+          interruptedRunId,
+        },
+      });
+      res.json({ interruptedRunId });
       return;
     }
 

@@ -101,9 +101,13 @@ export type {
   IssueRuntimeKind,
   IssueRuntimeLink,
   IssueConversationItemRole,
+  IssueConversationItemKind,
+  IssueConversationItemStatus,
   IssueConversationItem,
+  IssueConversationRuntimeInfo,
   IssueConversationPendingApproval,
   IssueConversationSnapshot,
+  IssueCreationContext,
   IssueComment,
   IssueDocument,
   IssueDocumentSummary,
@@ -118,6 +122,12 @@ export type {
 } from "./issue.js";
 export type { Goal } from "./goal.js";
 export type { Approval, ApprovalComment } from "./approval.js";
+export type {
+  RoadmapItem,
+  RoadmapItemLane,
+  RoadmapItemSource,
+  RoadmapItemStatus,
+} from "./roadmap.js";
 export type {
   BudgetPolicy,
   BudgetPolicySummary,

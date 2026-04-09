@@ -1,8 +1,15 @@
 import fs from "node:fs";
-import type { IssueConversationItem, IssueConversationSnapshot, IssueRuntimeLink } from "@paperclipai/shared";
+import type {
+  IssueConversationItem,
+  IssueConversationSnapshot,
+  IssueRuntimeLink,
+} from "@paperclipai/shared";
 import type { CodexThreadSummary } from "@paperclipai/shared/runtime-sources";
 import { readConfigFile } from "../config-file.js";
-import { readOpenClawSessions } from "@paperclipai/shared/runtime-sources";
+import {
+  readOpenClawSessions,
+  type OpenClawSessionSummary,
+} from "@paperclipai/shared/runtime-sources";
 import { spawn } from "node:child_process";
 
 function mapOpenClawContentText(content: Array<Record<string, unknown>>): string {
@@ -21,22 +28,193 @@ function mapOpenClawContentText(content: Array<Record<string, unknown>>): string
   return parts.join("\n\n").trim();
 }
 
-export function parseOpenClawSessionJsonl(content: string, limit = 100): IssueConversationItem[] {
-  const items: IssueConversationItem[] = [];
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue;
+function stripPaperclipDirectAgentBootstrap(text: string): string {
+  let trimmed = text.trim();
+
+  for (const sentinel of ["paperclip-agent-chat-bootstrap", "paperclip-agent-chat-guidance"]) {
+    const match = trimmed.match(
+      new RegExp(`^\\[\\[${sentinel}\\]\\][\\s\\S]*?\\[\\[\\/${sentinel}\\]\\]\\s*([\\s\\S]*)$`, "i"),
+    );
+    if (match) {
+      trimmed = (match[1] ?? "").trim();
     }
-    if (parsed.type !== "message") continue;
+  }
+
+  const legacySplit = trimmed.split(/\nBoard message:\n/i);
+  if (trimmed.startsWith("Direct board-to-agent chat inside Paperclip.") && legacySplit.length > 1) {
+    return legacySplit.slice(1).join("\nBoard message:\n").trim();
+  }
+
+  return trimmed;
+}
+
+export function extractPaperclipActions(text: string): {
+  cleanText: string;
+  actions: Array<Record<string, unknown>>;
+} {
+  const actions: Array<Record<string, unknown>> = [];
+  let cleanText = text;
+  const pattern = /\[\[paperclip-action\]\]([\s\S]*?)\[\[\/paperclip-action\]\]/gi;
+  cleanText = cleanText.replace(pattern, (_match, payload) => {
+    try {
+      const parsed = JSON.parse(String(payload).trim());
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        actions.push(parsed as Record<string, unknown>);
+      }
+    } catch {
+      // ignore malformed action blocks
+    }
+    return "";
+  });
+  if (actions.length === 0) {
+    const implicitDirectSend =
+      cleanText.match(/^Sent to\s+`?@?([^`\n:]+)`?\s+directly:\s+`([^`]+)`/i) ??
+      cleanText.match(/^Sent to\s+@?([^\s:]+)\s+directly:\s+(.+)$/i);
+    if (implicitDirectSend) {
+      const targetAgentName = implicitDirectSend[1]?.trim() ?? "";
+      const body = implicitDirectSend[2]?.trim() ?? "";
+      if (targetAgentName && body) {
+        actions.push({
+          type: "agent_conversation_send",
+          targetAgentName,
+          body,
+        });
+      }
+    }
+  }
+  return {
+    cleanText: cleanText.trim(),
+    actions,
+  };
+}
+
+function toOpenClawMessageEnvelope(
+  parsed: Record<string, unknown>,
+): { id: string | null; timestamp: string | null; message: Record<string, unknown> | null } | null {
+  if (parsed.type === "message") {
     const message =
       typeof parsed.message === "object" && parsed.message !== null && !Array.isArray(parsed.message)
         ? parsed.message as Record<string, unknown>
         : null;
+    return {
+      id: typeof parsed.id === "string" ? parsed.id : null,
+      timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
+      message,
+    };
+  }
+  if (typeof parsed.role === "string" && Array.isArray(parsed.content)) {
+    return {
+      id:
+        typeof parsed.id === "string"
+          ? parsed.id
+          : typeof (parsed.__openclaw as Record<string, unknown> | undefined)?.id === "string"
+            ? String((parsed.__openclaw as Record<string, unknown>).id)
+            : null,
+      timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
+      message: parsed,
+    };
+  }
+  return null;
+}
+
+export function normalizeOpenClawMessageText(roleRaw: string, text: string): string {
+  let next = text.trim();
+  if (roleRaw === "user") {
+    next = stripPaperclipDirectAgentBootstrap(next);
+    next = next.replace(
+      /^Sender \((?:untrusted|trusted) metadata\):\s*```json[\s\S]*?```\s*/i,
+      "",
+    );
+    next = next.replace(/^\[[^\]]+\]\s*/, "");
+  }
+  return next.trim();
+}
+
+type OpenClawConversationHydration = {
+  items: IssueConversationItem[];
+  sessionKey: string | null;
+  model: string | null;
+  provider: string | null;
+  thinking: string | null;
+  reasoning: string | null;
+  metadataJson: Record<string, unknown> | null;
+};
+
+function parseOpenClawConversationHydration(
+  parsedMessages: Array<Record<string, unknown>>,
+  limit = 100,
+): OpenClawConversationHydration {
+  const items: IssueConversationItem[] = [];
+  let model: string | null = null;
+  let provider: string | null = null;
+  let thinking: string | null = null;
+  let reasoning: string | null = null;
+
+  for (const parsed of parsedMessages) {
+    const type = typeof parsed.type === "string" ? parsed.type : "";
+
+    if (type === "model_change") {
+      provider = typeof parsed.provider === "string" ? parsed.provider : provider;
+      model =
+        typeof parsed.modelId === "string"
+          ? parsed.modelId
+          : typeof parsed.model === "string"
+            ? parsed.model
+            : model;
+      continue;
+    }
+
+    if (type === "thinking_level_change") {
+      thinking =
+        typeof parsed.thinkingLevel === "string"
+          ? parsed.thinkingLevel
+          : typeof parsed.level === "string"
+            ? parsed.level
+            : thinking;
+      continue;
+    }
+
+    if (type === "reasoning_level_change") {
+      reasoning =
+        typeof parsed.reasoningLevel === "string"
+          ? parsed.reasoningLevel
+          : typeof parsed.level === "string"
+            ? parsed.level
+            : reasoning;
+      continue;
+    }
+
+    if (type === "custom" && parsed.customType === "model-snapshot") {
+      const data =
+        typeof parsed.data === "object" && parsed.data !== null && !Array.isArray(parsed.data)
+          ? (parsed.data as Record<string, unknown>)
+          : null;
+      provider =
+        typeof data?.provider === "string"
+          ? data.provider
+          : typeof data?.modelProvider === "string"
+            ? data.modelProvider
+            : provider;
+      model =
+        typeof data?.modelId === "string"
+          ? data.modelId
+          : typeof data?.model === "string"
+            ? data.model
+            : model;
+      reasoning =
+        typeof data?.reasoningLevel === "string"
+          ? data.reasoningLevel
+          : reasoning;
+      thinking =
+        typeof data?.thinkingLevel === "string"
+          ? data.thinkingLevel
+          : thinking;
+      continue;
+    }
+
+    const envelope = toOpenClawMessageEnvelope(parsed);
+    if (!envelope) continue;
+    const message = envelope.message;
     if (!message) continue;
     const roleRaw = typeof message.role === "string" ? message.role : "system";
     const contentArray = Array.isArray(message.content)
@@ -45,7 +223,24 @@ export function parseOpenClawSessionJsonl(content: string, limit = 100): IssueCo
             typeof item === "object" && item !== null && !Array.isArray(item),
         )
       : [];
-    const text = mapOpenClawContentText(contentArray);
+    const text = normalizeOpenClawMessageText(roleRaw, mapOpenClawContentText(contentArray));
+    if (roleRaw === "assistant") {
+      provider =
+        typeof message.provider === "string"
+          ? message.provider
+          : typeof message.modelProvider === "string"
+            ? message.modelProvider
+            : provider;
+      model =
+        typeof message.model === "string"
+          ? message.model
+          : typeof message.modelId === "string"
+            ? message.modelId
+            : model;
+      if (!thinking && contentArray.some((item) => item.type === "thinking")) {
+        thinking = "on";
+      }
+    }
     if (!text) continue;
     const role: IssueConversationItem["role"] =
       roleRaw === "user"
@@ -56,15 +251,113 @@ export function parseOpenClawSessionJsonl(content: string, limit = 100): IssueCo
             ? "tool"
             : "system";
     items.push({
-      id: typeof parsed.id === "string" ? parsed.id : `${items.length + 1}`,
+      id: envelope.id ?? `${items.length + 1}`,
       role,
       text,
-      createdAt: typeof parsed.timestamp === "string" ? parsed.timestamp : null,
+      createdAt: envelope.timestamp,
       source: "openclaw",
       rawType: roleRaw,
     });
   }
-  return items.slice(-Math.max(1, limit));
+
+  return {
+    items: items.slice(-Math.max(1, limit)),
+    sessionKey: null,
+    model,
+    provider,
+    thinking,
+    reasoning,
+    metadataJson:
+      model || provider || thinking || reasoning
+        ? {
+          ...(provider ? { provider } : {}),
+          ...(model ? { model } : {}),
+          ...(thinking ? { thinking } : {}),
+          ...(reasoning ? { reasoning } : {}),
+        }
+        : null,
+  };
+}
+
+export function mapOpenClawSessionMessages(
+  messages: Array<Record<string, unknown>>,
+  limit = 100,
+): IssueConversationItem[] {
+  return parseOpenClawConversationHydration(messages, limit).items;
+}
+
+export function resolveOpenClawSessionSummary(
+  homeDir: string,
+  sessionKey: string,
+  limit = 500,
+): OpenClawSessionSummary | null {
+  const sessions = readOpenClawSessions(homeDir, limit);
+  return (
+    sessions.find((entry) => entry.sessionKey === sessionKey) ??
+    sessions.find((entry) => entry.sessionKey.endsWith(`:${sessionKey}`)) ??
+    null
+  );
+}
+
+export function parseOpenClawSessionJsonl(content: string, limit = 100): IssueConversationItem[] {
+  const parsedMessages = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+
+  return mapOpenClawSessionMessages(parsedMessages, limit);
+}
+
+export function readOpenClawConversationSnapshotFromHome(
+  homeDir: string,
+  sessionKey: string,
+  limit = 100,
+): OpenClawConversationHydration {
+  const session = resolveOpenClawSessionSummary(homeDir, sessionKey, 500);
+  if (!session?.sessionFile || !fs.existsSync(session.sessionFile)) {
+    return {
+      items: [],
+      sessionKey: session?.sessionKey ?? null,
+      model: null,
+      provider: null,
+      thinking: null,
+      reasoning: null,
+      metadataJson: null,
+    };
+  }
+  const parsedMessages = fs.readFileSync(session.sessionFile, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  const hydration = parseOpenClawConversationHydration(parsedMessages, limit);
+  return {
+    ...hydration,
+    sessionKey: session.sessionKey,
+  };
+}
+
+export function readOpenClawConversationFromHome(
+  homeDir: string,
+  sessionKey: string,
+  limit = 100,
+): IssueConversationItem[] {
+  return readOpenClawConversationSnapshotFromHome(homeDir, sessionKey, limit).items;
 }
 
 type PendingRequest = {
@@ -241,7 +534,7 @@ export function mapCodexThreadReadResult(result: Record<string, unknown>, limit 
         for (const block of content) {
           if (typeof block !== "object" || block === null || Array.isArray(block)) continue;
           const text = typeof (block as Record<string, unknown>).text === "string"
-            ? ((block as Record<string, unknown>).text as string).trim()
+            ? stripPaperclipDirectAgentBootstrap(((block as Record<string, unknown>).text as string).trim())
             : "";
           if (!text) continue;
           items.push({
@@ -258,12 +551,15 @@ export function mapCodexThreadReadResult(result: Record<string, unknown>, limit 
       if (itemType === "agentMessage") {
         const text = typeof item.text === "string" ? item.text.trim() : "";
         if (!text) continue;
+        const parsed = extractPaperclipActions(text);
+        if (!parsed.cleanText && parsed.actions.length === 0) continue;
         items.push({
           id: typeof item.id === "string" ? item.id : `${items.length + 1}`,
           role: "assistant",
-          text,
+          text: parsed.cleanText,
           createdAt: null,
           source: "codex",
+          metadataJson: parsed.actions.length > 0 ? { paperclipActions: parsed.actions } : null,
           rawType: itemType,
         });
         continue;
@@ -366,6 +662,7 @@ export async function readIssueConversation(input: {
       sourceStatus: "unlinked",
       activeTurnId: null,
       isStreaming: false,
+      runtimeInfo: null,
       pendingApprovals: [],
       items: [],
       error: null,
@@ -383,6 +680,17 @@ export async function readIssueConversation(input: {
         sourceStatus: "source_unavailable",
         activeTurnId: null,
         isStreaming: false,
+        runtimeInfo: {
+          runtimeKind: "codex",
+          externalConversationId: input.runtimeLink.externalConversationId,
+          externalConversationLabel: input.runtimeLink.externalConversationLabel,
+          model: null,
+          provider: "openai",
+          thinking: null,
+          reasoning: null,
+          sessionKey: null,
+          metadataJson: input.runtimeLink.metadataJson ?? null,
+        },
         pendingApprovals: [],
         items: [],
         error: "Codex runtime source is not configured.",
@@ -395,6 +703,17 @@ export async function readIssueConversation(input: {
         sourceStatus: "ok",
         activeTurnId: null,
         isStreaming: false,
+        runtimeInfo: {
+          runtimeKind: "codex",
+          externalConversationId: input.runtimeLink.externalConversationId,
+          externalConversationLabel: input.runtimeLink.externalConversationLabel,
+          model: null,
+          provider: "openai",
+          thinking: null,
+          reasoning: null,
+          sessionKey: null,
+          metadataJson: input.runtimeLink.metadataJson ?? null,
+        },
         pendingApprovals: [],
         items: await readCodexConversation(input.runtimeLink.externalConversationId, homeDir, limit),
         error: null,
@@ -409,22 +728,46 @@ export async function readIssueConversation(input: {
         sourceStatus: "source_unavailable",
         activeTurnId: null,
         isStreaming: false,
+        runtimeInfo: {
+          runtimeKind: "openclaw",
+          externalConversationId: input.runtimeLink.externalConversationId,
+          externalConversationLabel: input.runtimeLink.externalConversationLabel,
+          model: null,
+          provider: "openclaw",
+          thinking: null,
+          reasoning: null,
+          sessionKey: input.runtimeLink.externalConversationId,
+          metadataJson: input.runtimeLink.metadataJson ?? null,
+        },
         pendingApprovals: [],
         items: [],
         error: "OpenClaw runtime source is not configured.",
       };
     }
 
-    const [session] = readOpenClawSessions(homeDir, 500).filter(
-      (entry) => entry.sessionKey === input.runtimeLink?.externalConversationId,
+    const openclawSnapshot = readOpenClawConversationSnapshotFromHome(
+      homeDir,
+      input.runtimeLink.externalConversationId,
+      limit,
     );
-    if (!session?.sessionFile || !fs.existsSync(session.sessionFile)) {
+    if (openclawSnapshot.items.length === 0) {
       return {
         issueId: input.issueId,
         runtimeLink: input.runtimeLink,
         sourceStatus: "source_unavailable",
         activeTurnId: null,
         isStreaming: false,
+        runtimeInfo: {
+          runtimeKind: "openclaw",
+          externalConversationId: input.runtimeLink.externalConversationId,
+          externalConversationLabel: input.runtimeLink.externalConversationLabel,
+          model: openclawSnapshot.model,
+          provider: openclawSnapshot.provider ?? "openclaw",
+          thinking: openclawSnapshot.thinking,
+          reasoning: openclawSnapshot.reasoning,
+          sessionKey: openclawSnapshot.sessionKey ?? input.runtimeLink.externalConversationId,
+          metadataJson: openclawSnapshot.metadataJson ?? input.runtimeLink.metadataJson ?? null,
+        },
         pendingApprovals: [],
         items: [],
         error: "OpenClaw session file is not available.",
@@ -437,8 +780,19 @@ export async function readIssueConversation(input: {
       sourceStatus: "ok",
       activeTurnId: null,
       isStreaming: false,
+      runtimeInfo: {
+        runtimeKind: "openclaw",
+        externalConversationId: input.runtimeLink.externalConversationId,
+        externalConversationLabel: input.runtimeLink.externalConversationLabel,
+        model: openclawSnapshot.model,
+        provider: openclawSnapshot.provider ?? "openclaw",
+        thinking: openclawSnapshot.thinking,
+        reasoning: openclawSnapshot.reasoning,
+        sessionKey: openclawSnapshot.sessionKey ?? input.runtimeLink.externalConversationId,
+        metadataJson: openclawSnapshot.metadataJson ?? input.runtimeLink.metadataJson ?? null,
+      },
       pendingApprovals: [],
-      items: parseOpenClawSessionJsonl(fs.readFileSync(session.sessionFile, "utf8"), limit),
+      items: openclawSnapshot.items,
       error: null,
     };
   } catch (error) {
@@ -448,6 +802,19 @@ export async function readIssueConversation(input: {
       sourceStatus: "error",
       activeTurnId: null,
       isStreaming: false,
+      runtimeInfo: input.runtimeLink
+        ? {
+          runtimeKind: input.runtimeLink.runtimeKind,
+          externalConversationId: input.runtimeLink.externalConversationId,
+          externalConversationLabel: input.runtimeLink.externalConversationLabel,
+          model: null,
+          provider: input.runtimeLink.runtimeKind === "codex" ? "openai" : "openclaw",
+          thinking: null,
+          reasoning: null,
+          sessionKey: input.runtimeLink.runtimeKind === "openclaw" ? input.runtimeLink.externalConversationId : null,
+          metadataJson: input.runtimeLink.metadataJson ?? null,
+        }
+        : null,
       pendingApprovals: [],
       items: [],
       error: error instanceof Error ? error.message : String(error),
