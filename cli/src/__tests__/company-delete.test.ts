@@ -10,6 +10,7 @@ function makeCompany(overrides: Partial<Company>): Company {
     status: "active",
     pauseReason: null,
     pausedAt: null,
+    urlSlug: "alpha",
     issuePrefix: "ALP",
     issueCounter: 1,
     budgetMonthlyCents: 0,

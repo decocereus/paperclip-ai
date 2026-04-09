@@ -7,6 +7,12 @@ import { issueConversationRoutes } from "../routes/issue-conversations.js";
 const mockIssueService = vi.hoisted(() => ({
   getById: vi.fn(),
 }));
+const mockAgentService = vi.hoisted(() => ({
+  getById: vi.fn(),
+}));
+const mockSecretService = vi.hoisted(() => ({
+  resolveAdapterConfigForRuntime: vi.fn(),
+}));
 const mockIssueRuntimeLinkService = vi.hoisted(() => ({
   getForIssue: vi.fn(),
 }));
@@ -14,6 +20,8 @@ const mockReadIssueConversation = vi.hoisted(() => vi.fn());
 const mockReadConfigFile = vi.hoisted(() => vi.fn());
 const mockGetExistingCodexLiveConversationSession = vi.hoisted(() => vi.fn());
 const mockGetOrCreateCodexLiveConversationSession = vi.hoisted(() => vi.fn());
+const mockGetExistingOpenClawLiveConversationSession = vi.hoisted(() => vi.fn());
+const mockGetOrCreateOpenClawLiveConversationSession = vi.hoisted(() => vi.fn());
 const mockIssueConversationApprovalService = vi.hoisted(() => ({
   syncPendingApprovals: vi.fn(),
   resolveByRequestId: vi.fn(),
@@ -30,6 +38,8 @@ const mockLogActivity = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/index.js", () => ({
   issueService: () => mockIssueService,
+  agentService: () => mockAgentService,
+  secretService: () => mockSecretService,
   issueRuntimeLinkService: () => mockIssueRuntimeLinkService,
   issueConversationApprovalService: () => mockIssueConversationApprovalService,
   approvalService: () => mockApprovalService,
@@ -45,6 +55,11 @@ vi.mock("../config-file.js", () => ({
 vi.mock("../services/codex-live-conversations.js", () => ({
   getExistingCodexLiveConversationSession: mockGetExistingCodexLiveConversationSession,
   getOrCreateCodexLiveConversationSession: mockGetOrCreateCodexLiveConversationSession,
+}));
+
+vi.mock("../services/openclaw-live-conversations.js", () => ({
+  getExistingOpenClawLiveConversationSession: mockGetExistingOpenClawLiveConversationSession,
+  getOrCreateOpenClawLiveConversationSession: mockGetOrCreateOpenClawLiveConversationSession,
 }));
 
 function createApp(actor: any) {
@@ -66,6 +81,21 @@ describe("issue conversation routes", () => {
       id: "issue-1",
       companyId: "company-1",
       assigneeAgentId: "agent-1",
+    });
+    mockAgentService.getById.mockResolvedValue({
+      id: "agent-1",
+      adapterType: "openclaw_gateway",
+      adapterConfig: {
+        url: "ws://127.0.0.1:18789",
+        headers: { "x-openclaw-token": "gateway-token" },
+      },
+    });
+    mockSecretService.resolveAdapterConfigForRuntime.mockResolvedValue({
+      config: {
+        url: "ws://127.0.0.1:18789",
+        headers: { "x-openclaw-token": "gateway-token" },
+      },
+      secretKeys: new Set<string>(),
     });
     mockIssueRuntimeLinkService.getForIssue.mockResolvedValue({
       issueId: "issue-1",
@@ -90,6 +120,27 @@ describe("issue conversation routes", () => {
         },
         sourceStatus: "ok",
         activeTurnId: "turn-1",
+        isStreaming: true,
+        pendingApprovals: [],
+        items: [],
+        error: null,
+      }),
+    });
+    mockGetExistingOpenClawLiveConversationSession.mockReturnValue(null);
+    mockGetOrCreateOpenClawLiveConversationSession.mockReturnValue({
+      send: vi.fn().mockResolvedValue("run-oc-1"),
+      steer: vi.fn().mockResolvedValue("run-oc-2"),
+      interrupt: vi.fn().mockResolvedValue("run-oc-2"),
+      snapshot: vi.fn().mockResolvedValue({
+        issueId: "issue-1",
+        runtimeLink: {
+          issueId: "issue-1",
+          companyId: "company-1",
+          runtimeKind: "openclaw",
+          externalConversationId: "agent:main:main",
+        },
+        sourceStatus: "ok",
+        activeTurnId: "run-oc-1",
         isStreaming: true,
         pendingApprovals: [],
         items: [],
@@ -335,5 +386,143 @@ describe("issue conversation routes", () => {
       { decision: "accept", decidedByUserId: "user-1" },
     );
     expect(liveSession.resolveApproval).toHaveBeenCalledWith("42", "accept");
+  });
+
+  it("creates and uses the live openclaw session snapshot when linked", async () => {
+    mockIssueRuntimeLinkService.getForIssue.mockResolvedValue({
+      issueId: "issue-1",
+      companyId: "company-1",
+      runtimeKind: "openclaw",
+      externalConversationId: "agent:main:main",
+    });
+    mockReadConfigFile.mockReturnValue({
+      runtimeSources: {
+        openclaw: {
+          enabled: true,
+          mode: "linked",
+          homeDir: "/Users/test/.openclaw",
+        },
+      },
+    });
+    const liveSession = {
+      snapshot: vi.fn().mockResolvedValue({
+        issueId: "issue-1",
+        runtimeLink: {
+          issueId: "issue-1",
+          companyId: "company-1",
+          runtimeKind: "openclaw",
+          externalConversationId: "agent:main:main",
+        },
+        sourceStatus: "ok",
+        activeTurnId: "run-oc-1",
+        isStreaming: true,
+        pendingApprovals: [],
+        items: [],
+        error: null,
+      }),
+    };
+    mockGetOrCreateOpenClawLiveConversationSession.mockReturnValue(liveSession);
+
+    const app = createApp({
+      type: "board",
+      userId: "user-1",
+      source: "session",
+      isInstanceAdmin: false,
+      companyIds: ["company-1"],
+    });
+
+    const res = await request(app).get("/api/issues/issue-1/conversation");
+
+    expect(res.status).toBe(200);
+    expect(mockSecretService.resolveAdapterConfigForRuntime).toHaveBeenCalled();
+    expect(mockGetOrCreateOpenClawLiveConversationSession).toHaveBeenCalledWith({
+      issueId: "issue-1",
+      sessionKey: "agent:main:main",
+      openclawHome: "/Users/test/.openclaw",
+      adapterConfig: {
+        url: "ws://127.0.0.1:18789",
+        headers: { "x-openclaw-token": "gateway-token" },
+      },
+    });
+    expect(mockReadIssueConversation).not.toHaveBeenCalled();
+  });
+
+  it("sends a conversation message through the live openclaw session when linked", async () => {
+    mockIssueRuntimeLinkService.getForIssue.mockResolvedValue({
+      issueId: "issue-1",
+      companyId: "company-1",
+      runtimeKind: "openclaw",
+      externalConversationId: "agent:main:main",
+    });
+    mockReadConfigFile.mockReturnValue({
+      runtimeSources: {
+        openclaw: {
+          enabled: true,
+          mode: "linked",
+          homeDir: "/Users/test/.openclaw",
+        },
+      },
+    });
+
+    const app = createApp({
+      type: "board",
+      userId: "user-1",
+      source: "session",
+      isInstanceAdmin: false,
+      companyIds: ["company-1"],
+    });
+
+    const res = await request(app)
+      .post("/api/issues/issue-1/conversation/send")
+      .send({ body: "hello openclaw" });
+
+    expect(res.status).toBe(201);
+    expect(mockSecretService.resolveAdapterConfigForRuntime).toHaveBeenCalled();
+    expect(mockGetOrCreateOpenClawLiveConversationSession).toHaveBeenCalledWith({
+      issueId: "issue-1",
+      sessionKey: "agent:main:main",
+      openclawHome: "/Users/test/.openclaw",
+      adapterConfig: {
+        url: "ws://127.0.0.1:18789",
+        headers: { "x-openclaw-token": "gateway-token" },
+      },
+    });
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
+  it("interrupts the active live openclaw session for board users", async () => {
+    mockIssueRuntimeLinkService.getForIssue.mockResolvedValue({
+      issueId: "issue-1",
+      companyId: "company-1",
+      runtimeKind: "openclaw",
+      externalConversationId: "agent:main:main",
+    });
+    mockReadConfigFile.mockReturnValue({
+      runtimeSources: {
+        openclaw: {
+          enabled: true,
+          mode: "linked",
+          homeDir: "/Users/test/.openclaw",
+        },
+      },
+    });
+    mockGetExistingOpenClawLiveConversationSession.mockReturnValue(null);
+    mockGetOrCreateOpenClawLiveConversationSession.mockReturnValue({
+      interrupt: vi.fn().mockResolvedValue("run-oc-2"),
+    });
+
+    const app = createApp({
+      type: "board",
+      userId: "user-1",
+      source: "session",
+      isInstanceAdmin: false,
+      companyIds: ["company-1"],
+    });
+
+    const res = await request(app).post("/api/issues/issue-1/conversation/interrupt").send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ interruptedRunId: "run-oc-2" });
+    expect(mockSecretService.resolveAdapterConfigForRuntime).toHaveBeenCalled();
   });
 });

@@ -12,6 +12,7 @@ import type {
   HeartbeatRun,
   Approval,
   AgentConfigRevision,
+  IssueConversationSnapshot,
 } from "@paperclipai/shared";
 import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
 import { ApiError, api } from "./client";
@@ -161,6 +162,24 @@ export const agentsApi = {
     api.get<AgentRuntimeState>(agentPath(id, companyId, "/runtime-state")),
   taskSessions: (id: string, companyId?: string) =>
     api.get<AgentTaskSession[]>(agentPath(id, companyId, "/task-sessions")),
+  conversation: (id: string, limit = 100, companyId?: string) =>
+    api.get<IssueConversationSnapshot>(agentPath(id, companyId, `/conversation?limit=${limit}`)),
+  sendConversation: (id: string, body: string, companyId?: string) =>
+    api.post<IssueConversationSnapshot>(agentPath(id, companyId, "/conversation/send"), { body }),
+  steerConversation: (id: string, body: string, companyId?: string) =>
+    api.post<IssueConversationSnapshot>(agentPath(id, companyId, "/conversation/steer"), { body }),
+  interruptConversation: (id: string, companyId?: string) =>
+    api.post<IssueConversationSnapshot>(agentPath(id, companyId, "/conversation/interrupt"), {}),
+  resolveConversationApproval: (
+    id: string,
+    requestId: string,
+    decision: "accept" | "acceptForSession" | "decline" | "cancel",
+    companyId?: string,
+  ) =>
+    api.post<IssueConversationSnapshot>(
+      agentPath(id, companyId, `/conversation/approvals/${encodeURIComponent(requestId)}/resolve`),
+      { decision },
+    ),
   resetSession: (id: string, taskKey?: string | null, companyId?: string) =>
     api.post<void>(agentPath(id, companyId, "/runtime-state/reset-session"), { taskKey: taskKey ?? null }),
   adapterModels: (companyId: string, type: string) =>

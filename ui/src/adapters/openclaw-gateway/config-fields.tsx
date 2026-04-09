@@ -204,7 +204,7 @@ export function OpenClawGatewayConfigFields({
               }}
               immediate
               className={inputClass}
-              placeholder="operator.admin"
+              placeholder="operator.admin, operator.read, operator.write"
             />
           </Field>
 

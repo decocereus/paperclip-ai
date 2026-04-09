@@ -135,6 +135,21 @@ async function createMockGatewayServer(options?: {
         return;
       }
 
+      if (frame.method === "sessions.patch") {
+        socket.send(
+          JSON.stringify({
+            type: "res",
+            id: frame.id,
+            ok: true,
+            payload: {
+              ok: true,
+              key: frame.params?.key ?? null,
+            },
+          }),
+        );
+        return;
+      }
+
       if (frame.method === "agent.wait") {
         socket.send(
           JSON.stringify({
@@ -331,6 +346,21 @@ async function createMockGatewayServerWithPairing() {
               stream: "assistant",
               ts: Date.now(),
               data: { delta: "ok" },
+            },
+          }),
+        );
+        return;
+      }
+
+      if (frame.method === "sessions.patch") {
+        socket.send(
+          JSON.stringify({
+            type: "res",
+            id: frame.id,
+            ok: true,
+            payload: {
+              ok: true,
+              key: frame.params?.key ?? null,
             },
           }),
         );

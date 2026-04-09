@@ -11,6 +11,9 @@ import {
   renderPaperclipWakePrompt,
   stringifyPaperclipWakePayload,
 } from "@paperclipai/adapter-utils/server-utils";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import crypto, { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 
@@ -33,7 +36,7 @@ type GatewayDeviceIdentity = {
   deviceId: string;
   publicKeyRawBase64Url: string;
   privateKeyPem: string;
-  source: "configured" | "ephemeral";
+  source: "configured" | "linked_home" | "ephemeral";
 };
 
 type GatewayRequestFrame = {
@@ -86,7 +89,7 @@ type GatewayClientRequestOptions = {
 };
 
 const PROTOCOL_VERSION = 3;
-const DEFAULT_SCOPES = ["operator.admin"];
+const DEFAULT_SCOPES = ["operator.admin", "operator.read", "operator.write"];
 const DEFAULT_CLIENT_ID = "gateway-client";
 const DEFAULT_CLIENT_MODE = "backend";
 const DEFAULT_CLIENT_VERSION = "paperclip";
@@ -533,6 +536,11 @@ function buildDeviceAuthPayloadV3(params: {
 }
 
 function resolveDeviceIdentity(config: Record<string, unknown>): GatewayDeviceIdentity {
+  const linkedHome = resolveOpenClawHomeDir(config);
+  if (linkedHome) {
+    const linked = resolveLinkedHomeDeviceIdentity(linkedHome);
+    if (linked) return linked;
+  }
   const configuredPrivateKey = nonEmpty(config.devicePrivateKeyPem);
   if (configuredPrivateKey) {
     const privateKey = crypto.createPrivateKey(configuredPrivateKey);
@@ -557,6 +565,37 @@ function resolveDeviceIdentity(config: Record<string, unknown>): GatewayDeviceId
     privateKeyPem,
     source: "ephemeral",
   };
+}
+
+function resolveOpenClawHomeDir(config: Record<string, unknown>): string | null {
+  const configured =
+    nonEmpty(config.openclawHomeDir) ??
+    nonEmpty(process.env.OPENCLAW_HOME);
+  if (configured) return path.resolve(configured);
+  return path.resolve(os.homedir(), ".openclaw");
+}
+
+function resolveLinkedHomeDeviceIdentity(openclawHome: string): GatewayDeviceIdentity | null {
+  const identityPath = path.join(openclawHome, "identity", "device.json");
+  try {
+    const raw = JSON.parse(fs.readFileSync(identityPath, "utf8")) as Record<string, unknown>;
+    const privateKeyPem = nonEmpty(raw.privateKeyPem);
+    if (!privateKeyPem) return null;
+    const privateKey = crypto.createPrivateKey(privateKeyPem);
+    const publicKey = crypto.createPublicKey(privateKey);
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+    const publicKeyRaw = derivePublicKeyRaw(publicKeyPem);
+    return {
+      deviceId:
+        nonEmpty(raw.deviceId) ??
+        crypto.createHash("sha256").update(publicKeyRaw).digest("hex"),
+      publicKeyRawBase64Url: base64UrlEncode(publicKeyRaw),
+      privateKeyPem,
+      source: "linked_home",
+    };
+  } catch {
+    return null;
+  }
 }
 
 function isResponseFrame(value: unknown): value is GatewayResponseFrame {
@@ -1235,6 +1274,29 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         "stdout",
         `[openclaw-gateway] connected protocol=${asNumber(asRecord(hello)?.protocol, PROTOCOL_VERSION)}\n`,
       );
+
+      try {
+        await client.request(
+          "sessions.patch",
+          {
+            key: sessionKey,
+            execSecurity: "full",
+            execAsk: "off",
+          },
+          {
+            timeoutMs: connectTimeoutMs,
+          },
+        );
+        await ctx.onLog(
+          "stdout",
+          `[openclaw-gateway] session policy applied key=${sessionKey} execSecurity=full execAsk=off\n`,
+        );
+      } catch (error) {
+        await ctx.onLog(
+          "stdout",
+          `[openclaw-gateway] session policy patch skipped: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
 
       const acceptedPayload = await client.request<Record<string, unknown>>("agent", agentParams, {
         timeoutMs: connectTimeoutMs,

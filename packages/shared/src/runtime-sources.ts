@@ -75,6 +75,30 @@ function resolveHomeAwarePath(value: string): string {
   return path.resolve(expandHomePrefix(value));
 }
 
+function resolveOpenClawSessionIndexPath(homeDir: string): string {
+  const fallback = path.join(homeDir, "sessions", "sessions.json");
+  const configPath = path.join(homeDir, "openclaw.json");
+  try {
+    const raw = JSON.parse(fs.readFileSync(configPath, "utf8")) as unknown;
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return fallback;
+    const session =
+      typeof (raw as Record<string, unknown>).session === "object" &&
+      (raw as Record<string, unknown>).session !== null &&
+      !Array.isArray((raw as Record<string, unknown>).session)
+        ? (raw as Record<string, unknown>).session as Record<string, unknown>
+        : null;
+    const configuredStore =
+      typeof session?.store === "string" && session.store.trim().length > 0
+        ? session.store.trim()
+        : null;
+    if (!configuredStore) return fallback;
+    const expanded = expandHomePrefix(configuredStore);
+    return path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(homeDir, expanded);
+  } catch {
+    return fallback;
+  }
+}
+
 export function resolvePaperclipHomeDir(env: NodeJS.ProcessEnv = process.env): string {
   const raw = env.PAPERCLIP_HOME?.trim();
   return raw ? resolveHomeAwarePath(raw) : path.resolve(os.homedir(), ".paperclip");
@@ -229,7 +253,7 @@ function detectOpenClawSource(env: NodeJS.ProcessEnv): RuntimeSourceDiscovery {
     };
   }
 
-  const sessionsIndexPath = path.join(homeDir, "sessions", "sessions.json");
+  const sessionsIndexPath = resolveOpenClawSessionIndexPath(homeDir);
   const skillsDir = path.join(homeDir, "skills");
   const memoryDbPath = path.join(homeDir, "memory", "main.sqlite");
   return {
@@ -380,13 +404,13 @@ export function readCodexThreads(homeDir: string, limit = 100): CodexThreadSumma
 }
 
 export function readOpenClawSessions(homeDir: string, limit = 100): OpenClawSessionSummary[] {
-  const sessionsIndexPath = path.join(homeDir, "sessions", "sessions.json");
+  const sessionsIndexPath = resolveOpenClawSessionIndexPath(homeDir);
+  const sessionsIndexDir = path.dirname(sessionsIndexPath);
   try {
     const raw = JSON.parse(fs.readFileSync(sessionsIndexPath, "utf8")) as unknown;
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [];
 
     return Object.entries(raw as Record<string, unknown>)
-      .slice(0, Math.max(1, limit))
       .map(([sessionKey, value]) => {
         const record =
           typeof value === "object" && value !== null && !Array.isArray(value)
@@ -400,13 +424,23 @@ export function readOpenClawSessions(homeDir: string, limit = 100): OpenClawSess
           sessionKey,
           sessionId: typeof record.sessionId === "string" ? record.sessionId : null,
           updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : null,
-          sessionFile: typeof record.sessionFile === "string" ? record.sessionFile : null,
+          sessionFile:
+            typeof record.sessionFile === "string" && record.sessionFile.trim().length > 0
+              ? (() => {
+                const expanded = expandHomePrefix(record.sessionFile.trim());
+                return path.isAbsolute(expanded)
+                  ? path.resolve(expanded)
+                  : path.resolve(sessionsIndexDir, expanded);
+              })()
+              : null,
           authProfileOverride:
             typeof record.authProfileOverride === "string" ? record.authProfileOverride : null,
           originLabel: typeof origin?.label === "string" ? origin.label : null,
         };
       })
-      .filter((entry) => entry.sessionId || entry.sessionFile);
+      .filter((entry) => entry.sessionId || entry.sessionFile)
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+      .slice(0, Math.max(1, limit));
   } catch {
     return [];
   }

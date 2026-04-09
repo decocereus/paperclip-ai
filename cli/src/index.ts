@@ -15,6 +15,7 @@ import { registerAgentCommands } from "./commands/client/agent.js";
 import { registerApprovalCommands } from "./commands/client/approval.js";
 import { registerActivityCommands } from "./commands/client/activity.js";
 import { registerDashboardCommands } from "./commands/client/dashboard.js";
+import { registerRawApiCommands } from "./commands/client/api.js";
 import { registerRoutineCommands } from "./commands/routines.js";
 import { registerFeedbackCommands } from "./commands/client/feedback.js";
 import { applyDataDirOverride, type DataDirOptionLike } from "./config/data-dir.js";
@@ -137,6 +138,7 @@ heartbeat
   .action(heartbeatRun);
 
 registerContextCommands(program);
+registerRawApiCommands(program);
 registerCompanyCommands(program);
 registerIssueCommands(program);
 registerAgentCommands(program);

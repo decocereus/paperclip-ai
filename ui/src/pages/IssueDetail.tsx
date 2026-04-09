@@ -40,6 +40,7 @@ import { IssueDocumentsSection } from "../components/IssueDocumentsSection";
 import { IssueProperties } from "../components/IssueProperties";
 import { IssueWorkspaceCard } from "../components/IssueWorkspaceCard";
 import { LiveRunWidget } from "../components/LiveRunWidget";
+import { IssueChatPanel } from "../components/IssueChatPanel";
 import type { MentionOption } from "../components/MarkdownEditor";
 import { ImageGalleryModal } from "../components/ImageGalleryModal";
 import { ScrollToBottom } from "../components/ScrollToBottom";
@@ -59,6 +60,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Activity as ActivityIcon,
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -145,6 +147,11 @@ function asOptionalString(value: unknown): string | null {
 function readRuntimeLinkRepoPath(runtimeLink: IssueRuntimeLink | null | undefined): string | null {
   const metadata = asRecord(runtimeLink?.metadataJson);
   return asOptionalString(metadata?.cwd) ?? asOptionalString(metadata?.repoPath);
+}
+
+function isInferredRuntimeLink(runtimeLink: IssueRuntimeLink | null | undefined): boolean {
+  const metadata = asRecord(runtimeLink?.metadataJson);
+  return metadata?.inferred === true;
 }
 
 function usageNumber(usage: Record<string, unknown> | null, ...keys: string[]) {
@@ -316,6 +323,7 @@ export function IssueDetail() {
   const [copied, setCopied] = useState(false);
   const [mobilePropsOpen, setMobilePropsOpen] = useState(false);
   const [detailTab, setDetailTab] = useState("comments");
+  const [conversationLimit, setConversationLimit] = useState(100);
   const [secondaryOpen, setSecondaryOpen] = useState({
     approvals: false,
   });
@@ -380,8 +388,8 @@ export function IssueDetail() {
     enabled: !!issueId,
   });
   const { data: externalConversation } = useQuery({
-    queryKey: queryKeys.issues.conversation(issueId!),
-    queryFn: () => issuesApi.getConversation(issueId!, 20),
+    queryKey: [...queryKeys.issues.conversation(issueId!), conversationLimit],
+    queryFn: () => issuesApi.getConversation(issueId!, conversationLimit),
     enabled: !!issueId,
     refetchInterval: (query) => {
       const snapshot = query.state.data as IssueConversationSnapshot | undefined;
@@ -390,6 +398,10 @@ export function IssueDetail() {
         : false;
     },
   });
+
+  useEffect(() => {
+    setConversationLimit(100);
+  }, [issueId]);
 
   const { data: attachments } = useQuery({
     queryKey: queryKeys.issues.attachments(issueId!),
@@ -488,6 +500,11 @@ export function IssueDetail() {
     if (savedRepoPath) {
       setRepoPathDraft(savedRepoPath);
     }
+  }, [runtimeLink]);
+
+  useEffect(() => {
+    if (!runtimeLink) return;
+    setDetailTab((current) => (current === "comments" ? "chat" : current));
   }, [runtimeLink]);
   const keyboardShortcutsEnabled = instanceGeneralSettings?.keyboardShortcuts === true;
   const feedbackDataSharingPreference = instanceGeneralSettings?.feedbackDataSharingPreference ?? "prompt";
@@ -1725,18 +1742,28 @@ export function IssueDetail() {
           <div className="rounded-lg border border-border/70 bg-background/50 px-3 py-3 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{runtimeLink.externalConversationLabel ?? "Linked conversation"}</span>
+              {isInferredRuntimeLink(runtimeLink) ? (
+                <StatusBadge status="in_review" />
+              ) : null}
               {repoPathDraft.trim() ? (
                 <span className="text-xs text-muted-foreground">{truncate(repoPathDraft, 72)}</span>
               ) : null}
-              <Button
-                variant="outline"
-                size="sm"
-                className="ml-auto"
-                disabled={deleteRuntimeLink.isPending}
-                onClick={() => deleteRuntimeLink.mutate()}
-              >
-                {deleteRuntimeLink.isPending ? "Removing..." : "Remove Link"}
-              </Button>
+              {isInferredRuntimeLink(runtimeLink) ? (
+                <span className="text-xs text-muted-foreground">
+                  Auto-detected from the assigned agent session
+                </span>
+              ) : null}
+              {!isInferredRuntimeLink(runtimeLink) ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto"
+                  disabled={deleteRuntimeLink.isPending}
+                  onClick={() => deleteRuntimeLink.mutate()}
+                >
+                  {deleteRuntimeLink.isPending ? "Removing..." : "Remove Link"}
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -1905,85 +1932,29 @@ export function IssueDetail() {
             </div>
         ) : null}
 
-        {externalConversation?.runtimeLink && (
-          <div className="space-y-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">External Conversation Preview</p>
-            {externalConversation.isStreaming ? (
-              <div className="rounded-lg border border-border/70 bg-accent/10 px-3 py-2 text-xs text-muted-foreground">
-                <div className="flex items-center justify-between gap-3">
-                  <span>External conversation is active. New messages will steer the active turn.</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={interruptConversation.isPending}
-                    onClick={() => interruptConversation.mutate()}
-                  >
-                    {interruptConversation.isPending ? "Interrupting..." : "Interrupt"}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-            {(externalConversation.pendingApprovals.length ?? 0) > 0 ? (
-              <div className="space-y-2">
-                {externalConversation.pendingApprovals.map((approval) => (
-                  <div key={approval.requestId} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-3">
-                    <div className="text-sm font-medium">
-                      {approval.kind === "command" ? "Command approval required" : "File change approval required"}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {approval.reason ?? approval.command ?? "Codex is waiting for approval."}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {approval.availableDecisions.map((decision) => (
-                        <Button
-                          key={decision}
-                          size="sm"
-                          variant={decision === "accept" || decision === "acceptForSession" ? "default" : "outline"}
-                          disabled={resolveConversationApproval.isPending}
-                          onClick={() =>
-                            resolveConversationApproval.mutate({
-                              requestId: approval.requestId,
-                              decision: decision as "accept" | "acceptForSession" | "decline" | "cancel",
-                            })
-                          }
-                        >
-                          {decision}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {externalConversation.sourceStatus !== "ok" ? (
-              <div className="rounded-lg border border-border/70 bg-accent/10 px-3 py-3 text-sm text-muted-foreground">
-                {externalConversation.error ?? "Conversation preview is not available right now."}
-              </div>
-            ) : externalConversation.items.length === 0 ? (
-              <div className="rounded-lg border border-border/70 bg-accent/10 px-3 py-3 text-sm text-muted-foreground">
-                No external conversation items were returned for this link yet.
-              </div>
-            ) : (
-              <div className="rounded-lg border border-border/70 divide-y divide-border">
-                {externalConversation.items.map((item) => (
-                  <div key={`${item.source}:${item.id}`} className="px-3 py-2 text-sm">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-medium uppercase">{item.role}</span>
-                      <span>{item.source}</span>
-                    </div>
-                    <div className="mt-1 whitespace-pre-wrap break-words">{item.text}</div>
-                  </div>
-                ))}
-              </div>
-            )}
+        {externalConversation?.runtimeLink ? (
+          <div className="rounded-lg border border-border/70 bg-background/40 px-3 py-3 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-foreground">
+              <Bot className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">Use the Chat tab for the linked runtime conversation.</span>
+            </div>
+            <div className="mt-1 text-xs">
+              {externalConversation.sourceStatus === "ok"
+                ? "The issue chat is now the main place to talk to this linked session."
+                : externalConversation.error ?? "The linked runtime is not available right now."}
+            </div>
           </div>
-        )}
+        ) : null}
       </section>
 
       <Separator />
 
       <Tabs value={detailTab} onValueChange={setDetailTab} className="space-y-3">
         <TabsList variant="line" className="w-full justify-start gap-1">
+          <TabsTrigger value="chat" className="gap-1.5">
+            <Bot className="h-3.5 w-3.5" />
+            Chat
+          </TabsTrigger>
           <TabsTrigger value="comments" className="gap-1.5">
             <MessageSquare className="h-3.5 w-3.5" />
             Comments
@@ -2002,6 +1973,34 @@ export function IssueDetail() {
             </TabsTrigger>
           ))}
         </TabsList>
+
+        <TabsContent value="chat">
+          <IssueChatPanel
+            runtimeLink={runtimeLink}
+            conversation={externalConversation}
+            conversationLimit={conversationLimit}
+            fallbackComments={timelineComments}
+            agentMap={agentMap}
+            assistantName={
+              issue?.assigneeAgentId
+                ? (agentMap.get(issue.assigneeAgentId)?.name ?? "Agent")
+                : null
+            }
+            currentUserId={currentUserId}
+            composerDisabledReason={commentComposerDisabledReason}
+            isSending={addComment.isPending}
+            isInterrupting={interruptConversation.isPending}
+            isResolvingApproval={resolveConversationApproval.isPending}
+            onLoadOlder={() => setConversationLimit((current) => Math.min(current + 100, 1000))}
+            onSend={async (body) => {
+              await addComment.mutateAsync({ body });
+            }}
+            onInterrupt={() => interruptConversation.mutate()}
+            onResolveApproval={(requestId, decision) =>
+              resolveConversationApproval.mutate({ requestId, decision })
+            }
+          />
+        </TabsContent>
 
         <TabsContent value="comments">
           <CommentThread

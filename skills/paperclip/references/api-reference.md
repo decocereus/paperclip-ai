@@ -2,6 +2,12 @@
 
 Detailed reference for the Paperclip control plane API. For the core heartbeat procedure and critical rules, see the main `SKILL.md`.
 
+When `PAPERCLIP_BRIDGE_COMMAND` is available, prefer that bridge over raw `curl`. Example:
+
+```bash
+$PAPERCLIP_BRIDGE_COMMAND get /api/agents/me --json
+```
+
 ---
 
 ## Response Schemas
